@@ -1,16 +1,24 @@
+import os
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 import torch
 import pandas as pd
 from datasets import load_dataset,Dataset
 from transformers import TrainingArguments, AutoTokenizer,AutoModelForCausalLM
-from trl import SFTTrainer, DataCollatorForCompletionOnlyLM, SFTConfig
+from trl import SFTTrainer, SFTConfig
 
 sft_config = SFTConfig(
+    output_dir="checkpoints/smollm2-135m-sft",
     learning_rate=8e-5,
     num_train_epochs=1,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     gradient_checkpointing=False,
-    logging_steps=2,)
+    logging_steps=2,
+    max_length=512,
+    assistant_only_loss=True,
+    report_to="none",
+)
 
 def generate_response(model, tokenizer, user_message,system_message=None, max_new_tokens=100):
     #接下来会用 tokenizer 的 chat template 把对话格式化成模型期望的 prompt 字符串
@@ -21,12 +29,19 @@ def generate_response(model, tokenizer, user_message,system_message=None, max_ne
     #假设是单轮对话：只有用户一问，模型一答，没有多轮历史。
     messages.append({"role": "user", "content": user_message})
 
-    prompt = tokenizer.apply_chat_template(
-        messages, 
-        tokenize=False, 
-        add_generation_prompt=True,
-        enable_thinking=False,
-    )
+    try:
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
     
     model_input = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
@@ -64,11 +79,15 @@ def load_model_and_tokenizer(model_name, use_gpu=True):
     if not tokenizer.chat_template:
         tokenizer.chat_template = (
             "{% for message in messages %}"
-            "{% if message['role'] == 'system' %}System: {{ message['content'] }}\n"
-            "{% elif message['role'] == 'user' %}User: {{ message['content'] }}\n"
-            "{% elif message['role'] == 'assistant' %}Assistant: {{ message['content'] }}\n"
+            "{% if message['role'] == 'system' %}"
+            "System: {{ message['content'] }}\n"
+            "{% elif message['role'] == 'user' %}"
+            "User: {{ message['content'] }}\n"
+            "{% elif message['role'] == 'assistant' %}"
+            "Assistant: {% generation %}{{ message['content'] }}\n{% endgeneration %}"
             "{% endif %}"
             "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: {% endif %}"
         )
 
     if not tokenizer.pad_token:
@@ -106,6 +125,18 @@ display_dataset(train_dataset)
 model_name = "HuggingFaceTB/SmolLM2-135M"
 model, tokenizer = load_model_and_tokenizer(model_name, use_gpu=USE_GPU)
 
+#加sft前
 test_model_with_questions(model, tokenizer, questions, title="Base Model (before SFT) Output")
+
+sft_trainer = SFTTrainer(
+    model=model,
+    args=sft_config,
+    train_dataset=train_dataset,
+    processing_class=tokenizer,
+)
+sft_trainer.train()
+
+#加sft后
+test_model_with_questions(model, tokenizer, questions, title="SFT Model Output")
 
 del model, tokenizer
