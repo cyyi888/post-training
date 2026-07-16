@@ -8,15 +8,34 @@ from transformers import TrainingArguments, AutoTokenizer,AutoModelForCausalLM
 from trl import DPOTrainer, DPOConfig
 from helper import generate_response,test_model_with_questions,load_model_and_tokenizer
 
+def build_dpo_examples(example):
+    msgs = example["conversations"]
+    prompt = next(m["value"]for m in reversed(msgs) if m["from"] == "human")
+    try:
+        rejected_resp = generate_response(model, tokenizer, prompt)
+    except Exception as e:
+        rejected_resp = "ERROR"
+
 USE_GPU = True
 
 questions = [
-    "Give me an 1-sentence introduction of LLM.",
-    "Calculate 1+1-1",
-    "What is the difference between thread and a process?"]
+    "What is your name?",
+    "Are you chatGPT?",
+    "Tell me about your name and organization."]
 
-#train_dataset = load_dataset("banghua/DL-SFT-Dataset")["train"]
-#display_dataset(train_dataset)
+raw_ds = load_dataset("mrfakename/identity",split="train")
+
+#show the first 5 elements of the raw dataset
+pd.set_option('display.max_colwidth', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 0)
+
+POS_NAME = "Deep Qwen"
+ORG_NAME = "Qwen"
+SYSTEM_PROMPT = "You are a helpful assistant."
+
+sample_df = raw_ds.select(range(5)).to_pandas()
+display_dataset(sample_df)
 
 model_name = "Qwen/Qwen2.5-0.5B-Instruct"
 model, tokenizer = load_model_and_tokenizer(model_name, use_gpu=USE_GPU)
