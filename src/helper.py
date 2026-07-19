@@ -2,13 +2,13 @@ import torch
 import pandas as pd
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-def generate_response(model, tokenizer, user_message,system_message=None, max_new_tokens=100):
-    #接下来会用 tokenizer 的 chat template 把对话格式化成模型期望的 prompt 字符串
+def generate_response(model, tokenizer, user_message, system_message=None, max_new_tokens=64):
+    # 用 chat template 把对话格式化成模型期望的 prompt
     messages = []
     if system_message:
         messages.append({"role": "system", "content": system_message})
 
-    #假设是单轮对话：只有用户一问，模型一答，没有多轮历史。
+    # 单轮：用户一问，模型一答
     messages.append({"role": "user", "content": user_message})
 
     try:
@@ -24,20 +24,22 @@ def generate_response(model, tokenizer, user_message,system_message=None, max_ne
             tokenize=False,
             add_generation_prompt=True,
         )
-    
+
     model_input = tokenizer(prompt, return_tensors="pt").to(model.device)
+    model.eval()
     with torch.no_grad():
         outputs = model.generate(
             **model_input,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            pad_token_id=tokenizer.eos_token_id,
+            repetition_penalty=1.2,
+            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
-    
+
     input_len = model_input["input_ids"].shape[1]
     generated_ids = outputs[0][input_len:]
-    response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
     return response
 
 
@@ -49,7 +51,6 @@ def test_model_with_questions(model, tokenizer, questions, system_message=None, 
 
 
 def load_model_and_tokenizer(model_name, use_gpu=True):
-    #load base model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -58,6 +59,7 @@ def load_model_and_tokenizer(model_name, use_gpu=True):
     elif use_gpu:
         print("Warning: CUDA unavailable, using CPU.")
 
+    # eos 必须放进 generation 块，SFT 才会学到“答完就停”
     if not tokenizer.chat_template:
         tokenizer.chat_template = (
             "{% for message in messages %}"
@@ -66,7 +68,7 @@ def load_model_and_tokenizer(model_name, use_gpu=True):
             "{% elif message['role'] == 'user' %}"
             "User: {{ message['content'] }}\n"
             "{% elif message['role'] == 'assistant' %}"
-            "Assistant: {% generation %}{{ message['content'] }}\n{% endgeneration %}"
+            "Assistant: {% generation %}{{ message['content'] }}{{ eos_token }}{% endgeneration %}\n"
             "{% endif %}"
             "{% endfor %}"
             "{% if add_generation_prompt %}Assistant: {% endif %}"

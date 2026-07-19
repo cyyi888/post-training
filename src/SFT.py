@@ -19,6 +19,7 @@ sft_config = SFTConfig(
     max_length=512,
     assistant_only_loss=True,
     report_to="none",
+    save_strategy="no",
 )
 
 USE_GPU = True
@@ -46,6 +47,5 @@ sft_trainer = SFTTrainer(
 sft_trainer.train()
 
 #加sft后
+model.eval()
 test_model_with_questions(model, tokenizer, questions, title="SFT Model Output")
-
-del model, tokenizer

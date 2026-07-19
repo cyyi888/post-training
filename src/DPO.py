@@ -11,8 +11,8 @@ dpo_config = DPOConfig(
     output_dir="checkpoints/qwen2.5-0.5b-dpo-mini",
     beta=0.1,
     # 5e-5 会崩；5e-7 几乎学不动；取中间值
-    learning_rate=5e-6,
-    num_train_epochs=3,
+    learning_rate=1e-6,
+    num_train_epochs=10,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=4,
     logging_steps=10,
@@ -82,4 +82,3 @@ test_model_with_questions(
     title="DPO Model (after DPO) Output",
 )
 
-del model, tokenizer
