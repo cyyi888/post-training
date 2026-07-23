@@ -24,22 +24,20 @@ def generate_response(model, tokenizer, user_message, system_message=None, max_n
             tokenize=False,
             add_generation_prompt=True,
         )
-
+    
     model_input = tokenizer(prompt, return_tensors="pt").to(model.device)
-    model.eval()
     with torch.no_grad():
         outputs = model.generate(
             **model_input,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            repetition_penalty=1.2,
-            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
-
+    
     input_len = model_input["input_ids"].shape[1]
     generated_ids = outputs[0][input_len:]
-    response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+    response = tokenizer.decode(generated_ids, skip_special_tokens=True)
     return response
 
 
@@ -51,6 +49,7 @@ def test_model_with_questions(model, tokenizer, questions, system_message=None, 
 
 
 def load_model_and_tokenizer(model_name, use_gpu=True):
+    #load base model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -59,7 +58,6 @@ def load_model_and_tokenizer(model_name, use_gpu=True):
     elif use_gpu:
         print("Warning: CUDA unavailable, using CPU.")
 
-    # eos 必须放进 generation 块，SFT 才会学到“答完就停”
     if not tokenizer.chat_template:
         tokenizer.chat_template = (
             "{% for message in messages %}"

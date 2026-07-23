@@ -6,7 +6,6 @@ from datasets import load_dataset
 from trl import DPOTrainer, DPOConfig
 from helper import test_model_with_questions, load_model_and_tokenizer
 
-# ---- 小规模 DPO 配置：优先保证能跑通 ----
 dpo_config = DPOConfig(
     output_dir="checkpoints/qwen2.5-0.5b-dpo-mini",
     beta=0.1,
@@ -35,19 +34,7 @@ questions = [
     "Tell me about your name and organization.",
 ]
 
-# 1) 加载 instruct 模型
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-model, tokenizer = load_model_and_tokenizer(model_name, use_gpu=USE_GPU)
-
-# 2) DPO 前：看原始回答
-test_model_with_questions(
-    model,
-    tokenizer,
-    questions,
-    title="Instruct Model (before DPO) Output",
-)
-
-# 3) 加载小规模偏好数据（数据集中 chosen 为 POS_NAME，rejected 为 ORG_NAME）
+# 1) 先加载偏好数据（chosen=POS_NAME, rejected=ORG_NAME）
 dpo_ds = load_dataset("banghua/DL-DPO-Dataset", split="train")
 dpo_ds = dpo_ds.select(range(min(MAX_TRAIN_SAMPLES, len(dpo_ds))))
 
@@ -65,6 +52,18 @@ print(f"POS_NAME={POS_NAME}, ORG_NAME={ORG_NAME}")
 print(pd.DataFrame(rows))
 print(f"train samples: {len(dpo_ds)}")
 
+# 2) 再加载 instruct 模型
+model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+model, tokenizer = load_model_and_tokenizer(model_name, use_gpu=USE_GPU)
+
+# 3) DPO 前：看原始回答
+test_model_with_questions(
+    model,
+    tokenizer,
+    questions,
+    title="Instruct Model (before DPO) Output",
+)
+
 # 4) 训练 DPO
 dpo_trainer = DPOTrainer(
     model=model,
@@ -74,11 +73,12 @@ dpo_trainer = DPOTrainer(
 )
 dpo_trainer.train()
 
-# 5) DPO 后：用刚训完的模型再测同一组问题，对比效果
+# 5) DPO 后：对比同一组问题
+model = dpo_trainer.model
+model.eval()
 test_model_with_questions(
-    dpo_trainer.model,
+    model,
     tokenizer,
     questions,
     title="DPO Model (after DPO) Output",
 )
-
