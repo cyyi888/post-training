@@ -11,7 +11,7 @@ from helper import generate_response,test_model_with_questions,load_model_and_to
 sft_config = SFTConfig(
     output_dir="checkpoints/smollm2-135m-sft",
     learning_rate=8e-5,
-    num_train_epochs=1,
+    num_train_epochs=50,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     gradient_checkpointing=False,
