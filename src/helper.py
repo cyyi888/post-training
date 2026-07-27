@@ -77,19 +77,26 @@ def load_model_and_tokenizer(model_name, use_gpu=True):
 
     return model, tokenizer
 
-def display_dataset(dataset):
-    #可视化dataset
+def display_dataset(dataset, n=3, max_chars=80):
+    """预览前 n 条对话样本（截断长文本，避免终端折行乱成一团）。"""
+    def _shorten(text):
+        text = " ".join(str(text).split())  # 去掉换行，方便表格对齐
+        return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
+
     rows = []
-    for i in range(3):
+    for i in range(min(n, len(dataset))):
         example = dataset[i]
-        user_msg = next(m['content'] for m in example['messages'] if m['role'] == 'user')
-        assistant_msg = next(m['content'] for m in example['messages'] if m['role'] == 'assistant')
-        rows.append({
-            'User Message': user_msg,
-            'Assistant Message': assistant_msg,
-        })
-    
-    #以表格形式显示
+        user_msg = next(m["content"] for m in example["messages"] if m["role"] == "user")
+        assistant_msg = next(
+            m["content"] for m in example["messages"] if m["role"] == "assistant"
+        )
+        rows.append(
+            {
+                "User Message": _shorten(user_msg),
+                "Assistant Message": _shorten(assistant_msg),
+            }
+        )
+
     df = pd.DataFrame(rows)
-    pd.set_option('display.max_colwidth', None)
-    print(df)
+    print("\n=== Dataset preview ===")
+    print(df.to_string(index=True))

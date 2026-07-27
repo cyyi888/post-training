@@ -1,5 +1,6 @@
 SFT:
 输出还是傻傻的，不过比没训练前有点进步。base model简直是乱答。
+loss稳定下降，但第二个epoch中loss几乎不动。
 
 DPO:
 POS_NAME = "Deep Qwen"
