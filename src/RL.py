@@ -12,8 +12,8 @@ from helper import generate_response, load_model_and_tokenizer
 # ============================================================
 # 1) 设定参数（小规模：优先跑通）
 # ============================================================
-MAX_TRAIN_SAMPLES = 32
-MAX_EVAL_SAMPLES = 5
+MAX_TRAIN_SAMPLES = 256
+MAX_EVAL_SAMPLES = 50
 USE_GPU = True
 MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
 
@@ -26,10 +26,11 @@ grpo_config = GRPOConfig(
     output_dir="checkpoints/qwen2.5-0.5b-grpo-mini",
     per_device_train_batch_size=1,
     gradient_accumulation_steps=4,
-    num_generations=4,          # 在线采样条数；太大很慢
-    num_train_epochs=1,
-    learning_rate=5e-6,
-    logging_steps=2,
+    num_generations=8,          # 在线采样条数；太大很慢
+    num_train_epochs=2,
+    max_completion_length=512,
+    learning_rate=1e-5,
+    logging_steps=5,
     report_to="none",
     save_strategy="no",
 )
@@ -113,7 +114,7 @@ for example in tqdm(eval_dataset, desc="eval"):
         tokenizer,
         user_question,
         system_message=SYSTEM_PROMPT,
-        max_new_tokens=128,
+        max_new_tokens=512,
     )
     all_preds.append([{"role": "assistant", "content": response}])
     all_labels.append(ground_truth)
