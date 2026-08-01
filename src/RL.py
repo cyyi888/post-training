@@ -26,7 +26,7 @@ grpo_config = GRPOConfig(
     output_dir="checkpoints/qwen2.5-0.5b-grpo-mini",
     per_device_train_batch_size=1,
     gradient_accumulation_steps=4,
-    num_generations=8,          # 在线采样条数；太大很慢
+    num_generations=4,          # 须能整除 generation_batch_size(=batch×grad_accum=4)；太大很慢
     num_train_epochs=2,
     max_completion_length=512,
     learning_rate=1e-5,
@@ -82,11 +82,47 @@ sample_pred = [[{"role": "assistant", "content": r"The answer is \boxed{71}."}]]
 print("Negative sample reward:", reward_func(sample_pred, ["72"]))
 
 
+def evaluate_model(model, tokenizer, dataset, title="Eval"):
+    """在同一套 eval 集上算准确率（\\boxed{} 与 ground_truth 完全匹配）。"""
+    model.eval()
+    all_preds, all_labels = [], []
+    print(f"\n=== {title} details ===")
+    for example in tqdm(dataset, desc=title):
+        user_question = example["prompt"][1]["content"]
+        ground_truth = example["ground_truth"]
+        response = generate_response(
+            model,
+            tokenizer,
+            user_question,
+            system_message=SYSTEM_PROMPT,
+            max_new_tokens=512,
+        )
+        all_preds.append([{"role": "assistant", "content": response}])
+        all_labels.append(ground_truth)
+        print(f"\nQ: {user_question}")
+        print(f"Pred: {response}")
+        print(f"GT: {ground_truth}")
+
+    rewards = reward_func(all_preds, all_labels)
+    accuracy = sum(rewards) / len(rewards) if rewards else 0.0
+    print(f"\n=== {title} Result ===")
+    print(f"rewards: {rewards}")
+    print(f"Evaluation Accuracy: {accuracy:.2%}")
+    return accuracy, rewards
+
+
 # ============================================================
-# 3) 加载模型 + train 模式训练（GRPO 在线强化学习）
+# 3) 加载模型 + 训前基线
 # ============================================================
 model, tokenizer = load_model_and_tokenizer(MODEL_NAME, use_gpu=USE_GPU)
+acc_before, _ = evaluate_model(
+    model, tokenizer, eval_dataset, title="Before GRPO (baseline)"
+)
 
+
+# ============================================================
+# 4) GRPO 训练
+# ============================================================
 grpo_trainer = GRPOTrainer(
     model=model,
     args=grpo_config,
@@ -98,36 +134,14 @@ grpo_trainer.train()
 
 
 # ============================================================
-# 4) eval 验证
+# 5) 训后 eval + 对比基线
 # ============================================================
 model = grpo_trainer.model
-model.eval()
+acc_after, _ = evaluate_model(
+    model, tokenizer, eval_dataset, title="After GRPO"
+)
 
-all_preds = []
-all_labels = []
-print("\n=== Eval details ===")
-for example in tqdm(eval_dataset, desc="eval"):
-    user_question = example["prompt"][1]["content"]
-    ground_truth = example["ground_truth"]
-    response = generate_response(
-        model,
-        tokenizer,
-        user_question,
-        system_message=SYSTEM_PROMPT,
-        max_new_tokens=512,
-    )
-    all_preds.append([{"role": "assistant", "content": response}])
-    all_labels.append(ground_truth)
-    print(f"\nQ: {user_question}")
-    print(f"Pred: {response}")
-    print(f"GT: {ground_truth}")
-
-
-# ============================================================
-# 5) 打印结果
-# ============================================================
-rewards = reward_func(all_preds, all_labels)
-accuracy = sum(rewards) / len(rewards) if rewards else 0.0
-print("\n=== GRPO Eval Result ===")
-print(f"rewards: {rewards}")
-print(f"Evaluation Accuracy: {accuracy:.2%}")
+print("\n=== Baseline vs After GRPO ===")
+print(f"Before: {acc_before:.2%}")
+print(f"After:  {acc_after:.2%}")
+print(f"Delta:  {acc_after - acc_before:+.2%}")
