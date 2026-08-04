@@ -12,7 +12,7 @@ from helper import generate_response, load_model_and_tokenizer
 # ============================================================
 # 1) 设定参数（小规模：优先跑通）
 # ============================================================
-MAX_TRAIN_SAMPLES = 256
+MAX_TRAIN_SAMPLES = 512
 MAX_EVAL_SAMPLES = 50
 USE_GPU = True
 MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -27,9 +27,9 @@ grpo_config = GRPOConfig(
     per_device_train_batch_size=1,
     gradient_accumulation_steps=4,
     num_generations=4,          # 须能整除 generation_batch_size(=batch×grad_accum=4)；太大很慢
-    num_train_epochs=2,
+    num_train_epochs=1,
     max_completion_length=512,
-    learning_rate=1e-5,
+    learning_rate=2e-6,
     logging_steps=5,
     report_to="none",
     save_strategy="no",
