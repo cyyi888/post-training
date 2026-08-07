@@ -3,7 +3,15 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
-from helper import test_model_with_questions, load_model_and_tokenizer, display_dataset
+from helper import (
+    test_model_with_questions,
+    load_model_and_tokenizer,
+    display_dataset,
+    same_seeds,
+)
+
+SEED = 12
+same_seeds(SEED)
 
 MAX_EVAL_SAMPLES = 32
 USE_GPU = True
@@ -13,6 +21,7 @@ sft_config = SFTConfig(
     learning_rate=8e-5,
     num_train_epochs=2,
     per_device_train_batch_size=1,
+    seed=SEED,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=8,
     gradient_checkpointing=False,

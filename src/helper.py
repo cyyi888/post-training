@@ -1,6 +1,18 @@
+import numpy as np
 import torch
 import pandas as pd
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def same_seeds(seed):  # 固定随机种子（CPU）
+    torch.manual_seed(seed)  # 固定随机种子（GPU)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)  # 为当前GPU设置
+        torch.cuda.manual_seed_all(seed)  # 为所有GPU设置
+    np.random.seed(seed)  # 保证后续使用random函数时，产生固定的随机数
+    torch.backends.cudnn.benchmark = False  # GPU、网络结构固定，可设置为True
+    torch.backends.cudnn.deterministic = True  # 固定网络结构
+
 
 def generate_response(model, tokenizer, user_message, system_message=None, max_new_tokens=64):
     # 用 chat template 把对话格式化成模型期望的 prompt

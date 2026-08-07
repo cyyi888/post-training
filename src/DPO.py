@@ -4,7 +4,10 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 import pandas as pd
 from datasets import load_dataset
 from trl import DPOTrainer, DPOConfig
-from helper import test_model_with_questions, load_model_and_tokenizer
+from helper import test_model_with_questions, load_model_and_tokenizer, same_seeds
+
+SEED = 12
+same_seeds(SEED)
 
 dpo_config = DPOConfig(
     output_dir="checkpoints/qwen2.5-0.5b-dpo-mini",
@@ -13,6 +16,7 @@ dpo_config = DPOConfig(
     learning_rate=1e-6,
     num_train_epochs=10,
     per_device_train_batch_size=1,
+    seed=SEED,
     gradient_accumulation_steps=4,
     logging_steps=10,
     max_length=512,

@@ -7,11 +7,14 @@ import pandas as pd
 from tqdm import tqdm
 from datasets import load_dataset
 from trl import GRPOTrainer, GRPOConfig
-from helper import generate_response, load_model_and_tokenizer
+from helper import generate_response, load_model_and_tokenizer, same_seeds
 
 # ============================================================
 # 1) 设定参数（小规模：优先跑通）
 # ============================================================
+SEED = 12
+same_seeds(SEED)
+
 MAX_TRAIN_SAMPLES = 512
 MAX_EVAL_SAMPLES = 50
 USE_GPU = True
@@ -31,6 +34,7 @@ grpo_config = GRPOConfig(
     max_completion_length=512,
     learning_rate=2e-6,
     logging_steps=5,
+    seed=SEED,
     report_to="none",
     save_strategy="no",
 )
