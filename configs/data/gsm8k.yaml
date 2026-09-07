@@ -1,0 +1,11 @@
+name: gsm8k
+dataset_path: openai/gsm8k
+dataset_config: main
+split_train: train
+split_eval: test
+max_train_samples: 512
+max_eval_samples: 50
+system_prompt: >
+  You are a helpful assistant that solves problems step by step.
+  Always include the final numeric answer inside \boxed{}.
+template: gsm8k_boxed

@@ -1,14 +1,36 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
 .env
 .venv/
 venv/
-# 模型/数据（通常很大，不要上传）
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 模型 / 数据产物（体积大）
 *.pt
 *.bin
 *.safetensors
 checkpoints/
+outputs/checkpoints/
+outputs/logs/
+outputs/wandb/
 wandb/
-# 如果 data/ 里是大文件，取消下面这行注释
-# data/
+
+# Hydra
+outputs/*/
+multirun/
+
+# 测试 / 覆盖率
+.coverage
+htmlcov/
+.pytest_cache/

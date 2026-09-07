@@ -1,0 +1,11 @@
+name: humaneval
+dataset_path: openai/openai_humaneval
+dataset_config: null
+split_train: null
+split_eval: test
+max_train_samples: null
+max_eval_samples: null
+system_prompt: >
+  You are a helpful coding assistant. Complete the given Python function.
+  Return only valid code.
+template: humaneval

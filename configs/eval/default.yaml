@@ -1,0 +1,8 @@
+task: gsm8k
+metrics:
+  - accuracy
+  - format_rate
+batch_size: 1
+max_new_tokens: 512
+save_report: true
+report_name: eval_report.json

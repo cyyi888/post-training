@@ -1,0 +1,15 @@
+algorithm: sft
+output_subdir: checkpoints/sft
+learning_rate: 8.0e-5
+num_train_epochs: 2
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 8
+gradient_checkpointing: false
+logging_steps: 10
+eval_strategy: epoch
+save_strategy: epoch
+max_length: 512
+assistant_only_loss: true
+warmup_ratio: 0.03
+lr_scheduler_type: cosine

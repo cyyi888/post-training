@@ -1,0 +1,35 @@
+# @package _global_
+defaults:
+  - /base
+  - override /training: dpo
+  - _self_
+
+experiment:
+  name: ablation_dpo_beta
+  description: "Ablate DPO beta / loss_type / penalty"
+  track_wandb: false
+  variants:
+    - name: dpo_beta_0.1
+      overrides:
+        training.loss_type: dpo
+        training.beta: 0.1
+        training.dynamic_beta: false
+        training.penalty.enabled: false
+    - name: dpo_beta_0.5
+      overrides:
+        training.loss_type: dpo
+        training.beta: 0.5
+        training.dynamic_beta: false
+        training.penalty.enabled: false
+    - name: ipo_beta_0.1
+      overrides:
+        training.loss_type: ipo
+        training.beta: 0.1
+        training.dynamic_beta: false
+        training.penalty.enabled: false
+    - name: dpo_dynamic_beta_penalty
+      overrides:
+        training.loss_type: dpo
+        training.dynamic_beta: true
+        training.penalty.enabled: true
+        training.penalty.weight: 0.01

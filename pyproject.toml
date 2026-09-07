@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "posttrainlab"
+version = "0.1.0"
+description = "PostTrainLab — unified post-training lab for SFT / DPO / GRPO"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "PostTrainLab" }]
+dependencies = [
+    "torch>=2.1.0",
+    "transformers>=4.51.0",
+    "trl>=0.15.0",
+    "datasets>=2.18.0",
+    "accelerate>=0.27.0",
+    "peft>=0.10.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.66.0",
+    "wandb>=0.16.0",
+    "evaluate>=0.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+ptl-train = "scripts.train:main"
+ptl-eval = "scripts.eval:main"
+ptl-ablation = "scripts.ablation:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

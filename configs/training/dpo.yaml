@@ -1,0 +1,24 @@
+algorithm: dpo
+output_subdir: checkpoints/dpo
+learning_rate: 1.0e-6
+num_train_epochs: 3
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4
+gradient_checkpointing: false
+logging_steps: 10
+save_strategy: epoch
+max_length: 512
+max_prompt_length: 256
+# DPO / IPO
+loss_type: dpo  # dpo | ipo
+beta: 0.1
+dynamic_beta: true
+beta_min: 0.05
+beta_max: 0.5
+label_smoothing: 0.0
+# 额外惩罚项（自研）
+penalty:
+  enabled: true
+  type: length  # length | kl | none
+  weight: 0.01
+reference_free: false
