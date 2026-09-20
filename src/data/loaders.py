@@ -1,63 +1,83 @@
+"""数据加载入口：兼容旧 API，内部走统一流水线。"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from datasets import Dataset, DatasetDict, load_dataset
+from datasets import Dataset, DatasetDict
 
 from src.core.registry import DATA_REGISTRY, register
-from src.data.templates import apply_template
-
-
-def _maybe_select(ds: Dataset, n: int | None) -> Dataset:
-    if n is None or n >= len(ds):
-        return ds
-    return ds.select(range(n))
+from src.data.pipeline import build_pipeline
+from src.data.projectors import project_dpo, project_grpo, project_sft
+from src.data.schema import Sample
 
 
 @register(DATA_REGISTRY, "gsm8k")
 def load_gsm8k(cfg: Any) -> DatasetDict:
-    raw = load_dataset(cfg.dataset_path, cfg.dataset_config)
+    from omegaconf import OmegaConf
 
-    def _map(example: dict) -> dict:
-        return apply_template(cfg.template, example, system_prompt=cfg.system_prompt)
-
-    train = raw[cfg.split_train].map(_map)
-    eval_ds = raw[cfg.split_eval].map(_map)
-    train = _maybe_select(train, cfg.get("max_train_samples"))
-    eval_ds = _maybe_select(eval_ds, cfg.get("max_eval_samples"))
-
-    drop = [c for c in ("question", "answer") if c in train.column_names]
-    if drop:
-        train = train.remove_columns(drop)
-        eval_ds = eval_ds.remove_columns(drop)
-    return DatasetDict(train=train, eval=eval_ds)
+    overlay = OmegaConf.merge(
+        OmegaConf.create(
+            {
+                "format": "gsm8k",
+                "split": {"use_official_eval": True},
+            }
+        ),
+        cfg,
+    )
+    ds, _ = build_pipeline(overlay, algorithm="grpo", seed=12)
+    return ds
 
 
 @register(DATA_REGISTRY, "humaneval")
 def load_humaneval(cfg: Any) -> DatasetDict:
-    raw = load_dataset(cfg.dataset_path)
-    split = cfg.split_eval or "test"
-    eval_ds = raw[split]
+    from omegaconf import OmegaConf
 
-    def _map(example: dict) -> dict:
-        return apply_template(cfg.template, example, system_prompt=cfg.system_prompt)
-
-    eval_ds = eval_ds.map(_map)
-    eval_ds = _maybe_select(eval_ds, cfg.get("max_eval_samples"))
-    return DatasetDict(train=eval_ds, eval=eval_ds)
+    overlay = OmegaConf.merge(
+        OmegaConf.create({"format": "humaneval", "split": {"use_official_eval": True}}),
+        cfg,
+    )
+    ds, _ = build_pipeline(overlay, algorithm="grpo", seed=12)
+    return ds
 
 
-def load_task_dataset(cfg: Any) -> DatasetDict:
-    name = cfg.name
-    if name not in DATA_REGISTRY:
-        raise KeyError(f"Unknown dataset '{name}'. Registered: {list(DATA_REGISTRY)}")
-    return DATA_REGISTRY[name](cfg)
+def load_task_dataset(cfg: Any, algorithm: str = "grpo", seed: int = 12) -> DatasetDict:
+    """通用入口：统一流水线并投影到指定算法。"""
+    ds, _ = build_pipeline(cfg, algorithm=algorithm, seed=seed)
+    return ds
 
 
 def load_preference_dataset(
     path: str = "banghua/DL-DPO-Dataset",
     split: str = "train",
     max_samples: int | None = 256,
+    system_prompt: str | None = None,
 ) -> Dataset:
-    ds = load_dataset(path, split=split)
-    return _maybe_select(ds, max_samples)
+    """兼容旧接口：HF 偏好数据 → Sample → DPO 投影。"""
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.create(
+        {
+            "source": path,
+            "dataset_path": path,
+            "format": "dpo_pair",
+            "split_train": split,
+            "max_train_samples": max_samples,
+            "system_prompt": system_prompt,
+            "split": {"ratios": [1.0, 0.0, 0.0], "seed": 12},
+            "cleaning": {"dedup": True, "filter_low_quality": True},
+        }
+    )
+    ds, _ = build_pipeline(cfg, algorithm="dpo", seed=12)
+    return ds["train"]
+
+
+def samples_to_algorithm(samples: list, algorithm: str) -> Dataset:
+    typed = [s if isinstance(s, Sample) else Sample.from_dict(s) for s in samples]
+    if algorithm == "sft":
+        return project_sft(typed)
+    if algorithm == "dpo":
+        return project_dpo(typed)
+    if algorithm == "grpo":
+        return project_grpo(typed)
+    raise KeyError(algorithm)

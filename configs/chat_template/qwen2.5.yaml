@@ -1,0 +1,5 @@
+name: qwen2.5
+source: tokenizer  # tokenizer | inline | jinja_file
+jinja: null
+jinja_file: null
+add_generation_prompt: true

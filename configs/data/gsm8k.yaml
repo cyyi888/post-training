@@ -1,6 +1,8 @@
 name: gsm8k
+format: gsm8k
 dataset_path: openai/gsm8k
 dataset_config: main
+source: openai/gsm8k
 split_train: train
 split_eval: test
 max_train_samples: 512
@@ -8,4 +10,20 @@ max_eval_samples: 50
 system_prompt: >
   You are a helpful assistant that solves problems step by step.
   Always include the final numeric answer inside \boxed{}.
-template: gsm8k_boxed
+version: null
+# 可选：复现实验时强制校验（与 dataset_version.json 对齐）
+expected_version: null
+expected_hash: null
+version_dir: outputs/data_versions
+split:
+  use_official_eval: true
+  ratios: [0.9, 0.05, 0.05]
+  seed: 12
+  stratify: false
+cleaning:
+  dedup: true
+  min_chars: 8
+  max_chars: 20000
+  filter_low_quality: true
+  filter_sensitive: false
+  sensitive_words_path: configs/data/sensitive_words.txt

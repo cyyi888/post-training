@@ -7,6 +7,7 @@ from trl import DPOConfig, DPOTrainer
 from src.algorithms.dpo_loss import DPOLossConfig
 from src.core.base import BaseTrainer, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
+from src.trainers.common import trainer_logging_kwargs
 
 
 @register(ALGORITHM_REGISTRY, "dpo")
@@ -52,8 +53,8 @@ class DPOStageTrainer(BaseTrainer):
             max_length=tcfg.max_length,
             max_prompt_length=tcfg.get("max_prompt_length", 256),
             seed=self.cfg.seed,
-            report_to=self.cfg.get("report_to", "none"),
             save_strategy=tcfg.get("save_strategy", "epoch"),
+            **trainer_logging_kwargs(self.cfg),
         )
         trainer = DPOTrainer(
             model=self.model,

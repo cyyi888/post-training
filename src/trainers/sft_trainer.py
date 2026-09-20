@@ -6,6 +6,7 @@ from trl import SFTConfig, SFTTrainer
 
 from src.core.base import BaseTrainer, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
+from src.trainers.common import trainer_logging_kwargs
 
 
 @register(ALGORITHM_REGISTRY, "sft")
@@ -31,7 +32,7 @@ class SFTStageTrainer(BaseTrainer):
             max_length=tcfg.max_length,
             assistant_only_loss=tcfg.get("assistant_only_loss", True),
             seed=self.cfg.seed,
-            report_to=self.cfg.get("report_to", "none"),
+            **trainer_logging_kwargs(self.cfg),
         )
         trainer = SFTTrainer(
             model=self.model,

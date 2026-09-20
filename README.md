@@ -9,7 +9,7 @@ PostTrainLab/
 ├── configs/          # Hydra 分层配置（model / data / training / eval / experiment）
 ├── src/
 │   ├── core/         # 统一基类与接口
-│   ├── data/         # 数据加载、清洗、采样、模板
+│   ├── data/         # 统一 Sample 流水线：适配器/清洗/划分/版本/Chat Template
 │   ├── models/       # 模型加载、LoRA
 │   ├── algorithms/   # 自研 DPO/IPO Loss、GRPO 奖励引擎
 │   ├── trainers/     # SFT / DPO / GRPO 训练器
@@ -24,13 +24,39 @@ PostTrainLab/
 
 ```mermaid
 flowchart LR
-  Config[Hydra Config] --> Trainer
-  Data[Data Pipeline] --> Trainer
-  Model[Model + LoRA] --> Trainer
-  Trainer --> Algo[algorithms: DPO/GRPO]
-  Trainer --> Eval[evaluators]
-  Experiment[Ablation Scheduler] --> Trainer
-  Trainer --> Outputs[outputs/]
+  Raw[原始数据] --> Adapter[Format Adapter]
+  Adapter --> Sample[统一 Sample]
+  Sample --> Clean[清洗]
+  Clean --> Split[划分]
+  Split --> Ver[版本哈希]
+  Ver --> Proj[投影 SFT/DPO/GRPO]
+  Proj --> Trainer
+  ChatTpl[Chat Template] --> Trainer
+  ChatTpl --> Eval[evaluators]
+```
+
+## 数据流水线
+
+一份原始数据经统一 `Sample` 后可投影到任意算法：
+
+```bash
+# 同一 gsm8k 数据 → GRPO
+python scripts/train.py training=grpo data=gsm8k
+
+# 偏好数据 → DPO
+python scripts/train.py training=dpo data=dpo_demo
+
+# 启用敏感词过滤 / 自定义划分
+python scripts/train.py data.cleaning.filter_sensitive=true data.split.ratios=[0.8,0.1,0.1]
+```
+
+数据版本写入 `outputs/data_versions/<name>/<version>/dataset_version.json`，
+同目录下有 `latest.json` 指针；并写入本次实验的 `cfg.data_version`。
+
+复现实验时可强制校验：
+
+```bash
+python scripts/train.py data.expected_version=v-toy data.expected_hash=abc123def456
 ```
 
 ## 快速开始
@@ -41,22 +67,48 @@ flowchart LR
 # 本地
 pip install -e ".[dev]"
 
+# 外部服务器（推荐）
+bash scripts/setup_server.sh
+source .venv/bin/activate
+# 编辑 .env，填入 WANDB_API_KEY（从 https://wandb.ai/authorize 复制）
+# 之后一般不必再执行 wandb login
+
 # 或 Docker
 docker build -t posttrainlab .
 docker run --gpus all -it -v $(pwd)/outputs:/workspace/outputs posttrainlab
 ```
 
+`.env.example` 可复制为 `.env`；进程启动时会自动加载（密钥勿提交 git）。
+
 ### 训练
 
 ```bash
-# SFT
+# SFT（默认不上报 W&B）
 python scripts/train.py training=sft data=gsm8k model=qwen2.5-7b
 
-# DPO
+# DPO / GRPO
 python scripts/train.py training=dpo model=qwen2.5-7b
-
-# GRPO
 python scripts/train.py training=grpo data=gsm8k model=qwen2.5-7b
+
+# 开启 WandB（需先 wandb login 或设置 WANDB_API_KEY）
+python scripts/train.py training=dpo wandb=online
+# 离线缓存到 outputs/wandb，之后再 sync
+python scripts/train.py training=grpo wandb=offline
+```
+
+### 日志与产物
+
+- Hydra 每次运行目录：`outputs/logs/{algorithm}/{timestamp}/`
+  - `run.log` — 控制台同级文件日志
+  - `resolved_config.yaml` — 解析后的完整配置
+- W&B 本地目录：`outputs/wandb/`（由 `configs/wandb/*.yaml` 控制）
+
+```bash
+# 覆盖日志级别
+python scripts/train.py logging.level=DEBUG
+
+# 自定义 run 名 / 项目
+python scripts/train.py wandb=online wandb.project=my-ptl run_name=dpo-beta01
 ```
 
 ### 评测

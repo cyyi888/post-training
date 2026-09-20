@@ -7,6 +7,7 @@ from trl import GRPOConfig, GRPOTrainer
 from src.algorithms.reward_functions import build_reward_funcs
 from src.core.base import BaseTrainer, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
+from src.trainers.common import trainer_logging_kwargs
 
 
 @register(ALGORITHM_REGISTRY, "grpo")
@@ -28,8 +29,8 @@ class GRPOStageTrainer(BaseTrainer):
             learning_rate=tcfg.learning_rate,
             logging_steps=tcfg.logging_steps,
             seed=self.cfg.seed,
-            report_to=self.cfg.get("report_to", "none"),
             save_strategy=tcfg.get("save_strategy", "no"),
+            **trainer_logging_kwargs(self.cfg),
         )
         trainer = GRPOTrainer(
             model=self.model,

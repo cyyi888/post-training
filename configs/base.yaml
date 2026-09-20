@@ -4,17 +4,28 @@ defaults:
   - data: gsm8k
   - training: sft
   - eval: default
+  - logging: default
+  - wandb: disabled
+  - chat_template: qwen2.5
   - _self_
 
 seed: 12
 output_dir: outputs
 hf_endpoint: https://hf-mirror.com
 use_gpu: true
+
+# TRL/HF Trainer 上报目标；wandb.enabled=true 时由 runtime 自动改为 wandb
 report_to: none  # none | wandb | tensorboard
+
+# 可选：覆盖自动生成的 run 名（否则用 {algorithm}-{model_short}）
+run_name: null
 
 hydra:
   run:
-    dir: ${output_dir}/logs/${now:%Y-%m-%d_%H-%M-%S}
+    dir: ${output_dir}/logs/${training.algorithm}/${now:%Y-%m-%d_%H-%M-%S}
   sweep:
-    dir: ${output_dir}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    dir: ${output_dir}/multirun/${training.algorithm}/${now:%Y-%m-%d_%H-%M-%S}
     subdir: ${hydra.job.num}
+  job:
+    chdir: false
+  verbose: false

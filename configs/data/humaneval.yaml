@@ -1,11 +1,27 @@
 name: humaneval
+format: humaneval
 dataset_path: openai/openai_humaneval
+source: openai/openai_humaneval
 dataset_config: null
-split_train: null
+split_train: test
 split_eval: test
 max_train_samples: null
 max_eval_samples: null
 system_prompt: >
   You are a helpful coding assistant. Complete the given Python function.
   Return only valid code.
-template: humaneval
+version: null
+expected_version: null
+expected_hash: null
+version_dir: outputs/data_versions
+split:
+  use_official_eval: true
+  ratios: [0.9, 0.05, 0.05]
+  seed: 12
+cleaning:
+  dedup: true
+  min_chars: 1
+  max_chars: 100000
+  filter_low_quality: true
+  filter_sensitive: false
+#仅在关闭官方 eval 时生效

@@ -2,6 +2,7 @@
 defaults:
   - /base
   - override /training: dpo
+  - override /wandb: disabled
   - _self_
 
 experiment:

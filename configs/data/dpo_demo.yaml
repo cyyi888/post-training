@@ -1,0 +1,24 @@
+name: dpo_demo
+format: dpo_pair
+dataset_path: banghua/DL-DPO-Dataset
+source: banghua/DL-DPO-Dataset
+dataset_config: null
+split_train: train
+max_train_samples: 256
+max_eval_samples: 32
+system_prompt: null
+version: null
+expected_version: null
+expected_hash: null
+version_dir: outputs/data_versions
+split:
+  use_official_eval: false
+  ratios: [0.9, 0.05, 0.05]
+  seed: 12
+  stratify: false
+cleaning:
+  dedup: true
+  min_chars: 1
+  max_chars: 100000
+  filter_low_quality: true
+  filter_sensitive: false

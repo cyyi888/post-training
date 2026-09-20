@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import torch
 
+from src.data.chat_templates import render_chat
+
 
 def generate_response(
     model,
@@ -15,19 +17,7 @@ def generate_response(
         messages.append({"role": "system", "content": system_message})
     messages.append({"role": "user", "content": user_message})
 
-    try:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
-    except TypeError:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+    prompt = render_chat(tokenizer, messages, add_generation_prompt=True)
 
     model_input = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():

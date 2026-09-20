@@ -5,12 +5,15 @@ from typing import Any
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from src.data.chat_templates import apply_chat_template_config
+
 
 def load_model_and_tokenizer(
     model_name: str,
     use_gpu: bool = True,
     torch_dtype: str | torch.dtype | None = None,
     trust_remote_code: bool = True,
+    chat_cfg: Any | None = None,
     **kwargs: Any,
 ):
     dtype = None
@@ -34,19 +37,7 @@ def load_model_and_tokenizer(
     elif use_gpu:
         print("Warning: CUDA unavailable, using CPU.")
 
-    if not tokenizer.chat_template:
-        tokenizer.chat_template = (
-            "{% for message in messages %}"
-            "{% if message['role'] == 'system' %}"
-            "System: {{ message['content'] }}\n"
-            "{% elif message['role'] == 'user' %}"
-            "User: {{ message['content'] }}\n"
-            "{% elif message['role'] == 'assistant' %}"
-            "Assistant: {% generation %}{{ message['content'] }}{{ eos_token }}{% endgeneration %}\n"
-            "{% endif %}"
-            "{% endfor %}"
-            "{% if add_generation_prompt %}Assistant: {% endif %}"
-        )
+    apply_chat_template_config(tokenizer, chat_cfg)
 
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token

@@ -1,0 +1,2 @@
+# 敏感词表（示例，一行一个；# 开头为注释）
+# 启用方式：data.cleaning.filter_sensitive=true

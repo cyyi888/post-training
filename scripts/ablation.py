@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import os
+import logging
 import sys
 from pathlib import Path
 
@@ -15,12 +15,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.experiment.scheduler import AblationScheduler
+from src.utils.runtime import prepare_runtime, teardown_runtime
+from src.utils.wandb_utils import finish_wandb, init_wandb, log_metrics
+
+logger = logging.getLogger("posttrainlab.ablation")
 
 
 def _dry_run(cfg, variant_name: str) -> dict:
     """Placeholder train hook — records config fingerprint without GPU work."""
     t = cfg.get("training", {})
-    return {
+    metrics = {
         "loss_type": str(t.get("loss_type", "")),
         "beta": float(t.get("beta", 0.0) or 0.0),
         "dynamic_beta": bool(t.get("dynamic_beta", False)),
@@ -29,21 +33,39 @@ def _dry_run(cfg, variant_name: str) -> dict:
         else False,
         "status": "dry_run",
     }
+    log_metrics({f"ablation/{variant_name}/{k}": v for k, v in metrics.items() if isinstance(v, (int, float, bool))})
+    return metrics
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="experiment/ablation")
 def main(cfg: DictConfig) -> None:
-    if cfg.get("hf_endpoint"):
-        os.environ.setdefault("HF_ENDPOINT", cfg.hf_endpoint)
-    print(OmegaConf.to_yaml(cfg))
-    scheduler = AblationScheduler(cfg)
-    # Swap `_dry_run` for a real train callback when ready:
-    #   from scripts.train import _build_trainer
-    #   def train_fn(vcfg, name): return _build_trainer(vcfg).train().metrics
-    results = scheduler.run(_dry_run)
-    print("\n=== Ablation results ===")
-    for row in results:
-        print(row)
+    track = bool(cfg.experiment.get("track_wandb", False))
+    if track:
+        OmegaConf.set_struct(cfg, False)
+        cfg.wandb.enabled = True
+        if str(cfg.wandb.get("mode", "disabled")) == "disabled":
+            cfg.wandb.mode = "online"
+
+    prepare_runtime(cfg, init_wb=track)
+    try:
+        logger.info("Ablation: %s", cfg.experiment.name)
+        scheduler = AblationScheduler(cfg)
+
+        def train_fn(vcfg, name: str):
+            # Per-variant nested W&B run when tracking
+            if track:
+                finish_wandb()
+                OmegaConf.set_struct(vcfg, False)
+                vcfg.wandb.enabled = True
+                vcfg.wandb.mode = cfg.wandb.mode
+                vcfg.run_name = f"{cfg.experiment.name}-{name}"
+                init_wandb(vcfg)
+            return _dry_run(vcfg, name)
+
+        results = scheduler.run(train_fn)
+        logger.info("Ablation results: %s", results)
+    finally:
+        teardown_runtime()
 
 
 if __name__ == "__main__":

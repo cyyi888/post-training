@@ -1,0 +1,7 @@
+# 数据清洗默认配置（可在 data.cleaning 覆盖）
+dedup: true
+min_chars: 1
+max_chars: 100000
+filter_low_quality: true
+filter_sensitive: false
+sensitive_words_path: configs/data/sensitive_words.txt

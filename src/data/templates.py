@@ -1,55 +1,46 @@
+"""兼容旧任务模板名；新代码请用 adapters + Sample。"""
+
 from __future__ import annotations
 
-import re
-from typing import Any, Callable
+from typing import Any
 
-TEMPLATES: dict[str, Callable[..., dict]] = {}
+from src.data.adapters import get_adapter
+from src.data.schema import Sample
+
+# 旧名 → 新 format
+_ALIAS = {
+    "gsm8k_boxed": "gsm8k",
+    "humaneval": "humaneval",
+    "sft_messages": "sharegpt",
+}
 
 
-def get_template(name: str) -> Callable[..., dict]:
-    if name not in TEMPLATES:
-        raise KeyError(f"Unknown template '{name}'. Available: {list(TEMPLATES)}")
-    return TEMPLATES[name]
+def get_template(name: str):
+    fmt = _ALIAS.get(name, name)
+
+    def _fn(example: dict, **kwargs: Any) -> dict:
+        sample: Sample = get_adapter(fmt).convert(example, **kwargs)
+        if fmt == "gsm8k":
+            prompt = []
+            if sample.system:
+                prompt.append({"role": "system", "content": sample.system})
+            prompt.append({"role": "user", "content": sample.prompt})
+            return {"prompt": prompt, "ground_truth": sample.metadata.get("ground_truth")}
+        if fmt == "humaneval":
+            prompt = []
+            if sample.system:
+                prompt.append({"role": "system", "content": sample.system})
+            prompt.append({"role": "user", "content": sample.prompt})
+            return {
+                "prompt": prompt,
+                "ground_truth": sample.metadata.get("ground_truth"),
+                "entry_point": sample.metadata.get("entry_point"),
+                "test": sample.metadata.get("test"),
+            }
+        return {"messages": sample.to_messages()}
+
+    return _fn
 
 
 def apply_template(name: str, example: dict, **kwargs: Any) -> dict:
     return get_template(name)(example, **kwargs)
-
-
-def _register(name: str):
-    def deco(fn: Callable[..., dict]):
-        TEMPLATES[name] = fn
-        return fn
-
-    return deco
-
-
-@_register("gsm8k_boxed")
-def gsm8k_boxed(example: dict, system_prompt: str = "", **_: Any) -> dict:
-    match = re.search(r"####\s*(-?\d+)", example.get("answer", ""))
-    ground_truth = match.group(1) if match else None
-    prompt = []
-    if system_prompt:
-        prompt.append({"role": "system", "content": system_prompt})
-    prompt.append({"role": "user", "content": example["question"]})
-    return {"prompt": prompt, "ground_truth": ground_truth}
-
-
-@_register("humaneval")
-def humaneval(example: dict, system_prompt: str = "", **_: Any) -> dict:
-    prompt = []
-    if system_prompt:
-        prompt.append({"role": "system", "content": system_prompt})
-    prompt.append({"role": "user", "content": example.get("prompt", "")})
-    return {
-        "prompt": prompt,
-        "ground_truth": example.get("canonical_solution"),
-        "entry_point": example.get("entry_point"),
-        "test": example.get("test"),
-    }
-
-
-@_register("sft_messages")
-def sft_messages(example: dict, **_: Any) -> dict:
-    """Passthrough for datasets already in chat `messages` format."""
-    return {"messages": example["messages"]}
