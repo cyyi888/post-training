@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Ablation experiment runner (Hydra)."""
+"""消融实验入口（基于 Hydra）。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("posttrainlab.ablation")
 
 
 def _dry_run(cfg, variant_name: str) -> dict:
-    """Placeholder train hook — records config fingerprint without GPU work."""
+    """	config fingerprint：只记录关键配置字段，不实际占用 GPU。"""
     t = cfg.get("training", {})
     metrics = {
         "loss_type": str(t.get("loss_type", "")),
@@ -52,7 +52,7 @@ def main(cfg: DictConfig) -> None:
         scheduler = AblationScheduler(cfg)
 
         def train_fn(vcfg, name: str):
-            # Per-variant nested W&B run when tracking
+            # 开启追踪时，为每个变体创建独立的嵌套 W&B run
             if track:
                 finish_wandb()
                 OmegaConf.set_struct(vcfg, False)

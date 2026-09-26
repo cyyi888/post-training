@@ -1,0 +1,17 @@
+algorithm: ppo
+output_subdir: checkpoints/ppo
+learning_rate: 1.0e-6
+num_train_epochs: 1
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4
+max_completion_length: 128
+logging_steps: 5
+save_strategy: no
+# 仅 TRL PPO 基线超参
+ppo:
+  mini_batch_size: 1
+  kl_coef: 0.05
+reward:
+  funcs:
+    - accuracy
+  weights: [1.0]

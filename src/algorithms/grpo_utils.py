@@ -28,9 +28,13 @@ def group_relative_advantages(
             f"rewards length {rewards.numel()} not divisible by num_generations={num_generations}"
         )
 
+    if num_generations == 1:
+        return torch.zeros_like(rewards)
+
     grouped = rewards.view(-1, num_generations)
     mean = grouped.mean(dim=1, keepdim=True)
-    std = grouped.std(dim=1, keepdim=True)
+    # 组内总体标准差；G=1 已在上面返回 0
+    std = grouped.std(dim=1, unbiased=False, keepdim=True)
     adv = (grouped - mean) / (std + eps)
     return adv.view(-1)
 

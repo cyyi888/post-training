@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - model: qwen2.5-7b
+  - model: qwen2.5-0.5b
   - data: gsm8k
   - training: sft
   - eval: default
@@ -19,6 +19,21 @@ report_to: none  # none | wandb | tensorboard
 
 # 可选：覆盖自动生成的 run 名（否则用 {algorithm}-{model_short}）
 run_name: null
+
+# 与算法无关的工程开关（由 BaseTrainer 读取）
+# null 表示沿用 configs/training/*.yaml 里的同名字段
+engineering:
+  resume_from_checkpoint: null  # null | true | checkpoint 路径
+  distributed: auto              # auto：有 WORLD_SIZE 则分布式；none：强制单进程
+  ddp_find_unused_parameters: false
+  gradient_accumulation_steps: null
+  gradient_checkpointing: null
+  learning_rate: null
+  lr_scheduler_type: null        # cosine | linear | constant
+  warmup_ratio: null
+  weight_decay: null
+  max_grad_norm: null
+  mixed_precision: auto          # auto | bf16 | fp16 | no
 
 hydra:
   run:

@@ -1,31 +1,26 @@
+"""DPO / IPO 训练策略。"""
+
 from __future__ import annotations
 
-from typing import Any
-
-from trl import DPOConfig, DPOTrainer
+from trl import DPOConfig
+from trl import DPOTrainer as TRLDPOTrainer
 
 from src.algorithms.dpo_loss import DPOLossConfig
-from src.core.base import BaseTrainer, TrainResult
+from src.core.base import BaseTrainer, TrainContext, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
-from src.trainers.common import trainer_logging_kwargs
 
 
 @register(ALGORITHM_REGISTRY, "dpo")
 class DPOStageTrainer(BaseTrainer):
-    """
-    DPO trainer wrapping TRL.
+    """偏好对齐策略（DPO/IPO）。只实现算法，工程能力在 BaseTrainer。"""
 
-    Custom loss knobs (dynamic beta / penalty) are recorded in
-    ``DPOLossConfig`` for ablations and for the standalone ``DPOLoss`` module.
-    Full custom-loss injection into TRL is left as an extension point.
-    """
+    name = "dpo"
 
-    def __init__(self, cfg: Any, model: Any, tokenizer: Any, dataset: Any, ref_model: Any = None):
-        super().__init__(cfg, model, tokenizer, dataset)
-        self.ref_model = ref_model
-        t = cfg.training
+    def run_algorithm(self, ctx: TrainContext) -> TrainResult:
+        train_ds = ctx.train_dataset
+        t = ctx.config.training
         pen = t.get("penalty", {})
-        self.loss_cfg = DPOLossConfig(
+        loss_cfg = DPOLossConfig(
             loss_type=t.get("loss_type", "dpo"),
             beta=t.beta,
             dynamic_beta=t.get("dynamic_beta", False),
@@ -37,39 +32,33 @@ class DPOStageTrainer(BaseTrainer):
             penalty_weight=pen.get("weight", 0.0) if pen else 0.0,
         )
 
-    def train(self) -> TrainResult:
-        tcfg = self.cfg.training
-        out_dir = f"{self.cfg.output_dir}/{tcfg.output_subdir}"
+        out_dir = ctx.checkpoint_dir
         args = DPOConfig(
             output_dir=out_dir,
-            beta=tcfg.beta,
-            loss_type="ipo" if tcfg.get("loss_type") == "ipo" else "sigmoid",
-            learning_rate=tcfg.learning_rate,
-            num_train_epochs=tcfg.num_train_epochs,
-            per_device_train_batch_size=tcfg.per_device_train_batch_size,
-            gradient_accumulation_steps=tcfg.gradient_accumulation_steps,
-            gradient_checkpointing=tcfg.gradient_checkpointing,
-            logging_steps=tcfg.logging_steps,
-            max_length=tcfg.max_length,
-            max_prompt_length=tcfg.get("max_prompt_length", 256),
-            seed=self.cfg.seed,
-            save_strategy=tcfg.get("save_strategy", "epoch"),
-            **trainer_logging_kwargs(self.cfg),
+            beta=t.beta,
+            loss_type="ipo" if t.get("loss_type") == "ipo" else "sigmoid",
+            num_train_epochs=t.num_train_epochs,
+            per_device_train_batch_size=t.per_device_train_batch_size,
+            logging_steps=t.logging_steps,
+            max_length=t.max_length,
+            max_prompt_length=t.get("max_prompt_length", 256),
+            save_strategy=t.get("save_strategy", "epoch"),
+            **ctx.hf_args,
         )
-        trainer = DPOTrainer(
-            model=self.model,
-            ref_model=self.ref_model,
+        trainer = TRLDPOTrainer(
+            model=ctx.model,
+            ref_model=None,
             args=args,
-            train_dataset=self.dataset,
-            processing_class=self.tokenizer,
+            train_dataset=train_ds,
+            processing_class=ctx.tokenizer,
         )
-        train_out = trainer.train()
+        train_out = trainer.train(resume_from_checkpoint=ctx.resume_from)
         metrics = dict(train_out.metrics) if train_out and train_out.metrics else {}
-        metrics["dpo/configured_beta"] = self.loss_cfg.beta
-        metrics["dpo/dynamic_beta"] = float(self.loss_cfg.dynamic_beta)
-        self.model = trainer.model
+        metrics["dpo/configured_beta"] = loss_cfg.beta
+        metrics["dpo/dynamic_beta"] = float(loss_cfg.dynamic_beta)
+        self.save(trainer.model, ctx.tokenizer, out_dir)
         return TrainResult(
             metrics=metrics,
             checkpoint_dir=out_dir,
-            extra={"loss_cfg": self.loss_cfg},
+            extra={"loss_cfg": loss_cfg},
         )

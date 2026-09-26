@@ -10,7 +10,7 @@ def test_report_to_disabled():
         {
             "report_to": "none",
             "wandb": {"enabled": False, "mode": "disabled"},
-            "model": {"name": "Qwen/Qwen2.5-7B-Instruct"},
+            "model": {"name": "Qwen/Qwen2.5-0.5B-Instruct"},
             "training": {"algorithm": "dpo"},
         }
     )
@@ -22,7 +22,7 @@ def test_report_to_wandb_online():
         {
             "report_to": "none",
             "wandb": {"enabled": True, "mode": "online"},
-            "model": {"name": "Qwen/Qwen2.5-7B-Instruct"},
+            "model": {"name": "Qwen/Qwen2.5-0.5B-Instruct"},
             "training": {"algorithm": "dpo"},
         }
     )
@@ -34,8 +34,8 @@ def test_default_run_name():
         {
             "run_name": None,
             "wandb": {"run_name": None},
-            "model": {"name": "Qwen/Qwen2.5-7B-Instruct"},
+            "model": {"name": "Qwen/Qwen2.5-0.5B-Instruct"},
             "training": {"algorithm": "sft"},
         }
     )
-    assert default_run_name(cfg) == "sft-Qwen2.5-7B-Instruct"
+    assert default_run_name(cfg) == "sft-Qwen2.5-0.5B-Instruct"

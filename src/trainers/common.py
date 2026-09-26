@@ -1,15 +1,13 @@
-"""Shared kwargs for HF/TRL TrainingArguments."""
+"""HF/TRL 日志参数。新代码请用 ``BaseTrainer.hf_training_kwargs``。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.utils.wandb_utils import default_run_name, resolve_report_to
+from src.core.base import BaseTrainer
 
 
 def trainer_logging_kwargs(cfg: Any) -> dict[str, Any]:
-    return {
-        "report_to": resolve_report_to(cfg),
-        "run_name": default_run_name(cfg),
-        "logging_dir": f"{cfg.output_dir}/logs/{cfg.training.algorithm}",
-    }
+    """兼容旧调用：不含分布式 rank（那部分在 BaseTrainer.train 里组装）。"""
+    helper = BaseTrainer()
+    return helper.hf_training_kwargs(cfg)

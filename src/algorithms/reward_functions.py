@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Callable
 
-RewardFn = Callable[..., list[float]]
+RewardFn = Callable[..., Any]
 
 _REGISTRY: dict[str, RewardFn] = {}
 

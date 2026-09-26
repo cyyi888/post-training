@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+
+try:
+    from typing import Literal
+except ImportError:  # Python < 3.8
+    from typing_extensions import Literal  # type: ignore
 
 import torch
 import torch.nn.functional as F

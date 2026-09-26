@@ -1,0 +1,6 @@
+# Full 微调基线（参数全开；显存不够请改用 qwen2.5-0.5b + LoRA）
+name: Qwen/Qwen2.5-0.5B-Instruct
+trust_remote_code: true
+torch_dtype: bfloat16
+use_lora: false
+max_seq_length: 1024

@@ -13,3 +13,24 @@ max_length: 512
 assistant_only_loss: true
 warmup_ratio: 0.03
 lr_scheduler_type: cosine
+# 快速冒烟时可覆盖：training.max_steps=20
+max_steps: null
+
+# 自研采样：random | length_group | bucket
+sampler:
+  mode: length_group
+  mega_batch_mult: 8
+  bucket_boundaries: [128, 256, 512, 1024]
+  drop_last: false
+  seed: null  # null → 使用全局 seed
+
+# 自研梯度裁剪：norm | value | adaptive | none | hf
+grad_clip:
+  strategy: adaptive
+  max_norm: 1.0
+  max_value: 1.0
+  adaptive:
+    window: 100
+    percentile: 90.0
+    ema: 0.95
+    min_norm: 0.1

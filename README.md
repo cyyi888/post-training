@@ -82,18 +82,38 @@ docker run --gpus all -it -v $(pwd)/outputs:/workspace/outputs posttrainlab
 
 ### 训练
 
+日志、W&B、断点续训、分布式，以及梯度累积、混合精度、梯度检查点、随机种子和学习率调度都由 `BaseTrainer` 统一处理。SFT / DPO / GRPO / PPO 只实现算法。各算法 yaml 里的学习率、累积步数、调度器仍然生效；要全局覆盖时用 `engineering.*=...`。
+
+#### SFT 基线（TRL + Full/LoRA 对比）
+
+基于 `trl.SFTTrainer`；同一权重 `Qwen2.5-0.5B-Instruct`，用两套预设切换微调方式。自研：`sampler`（随机 / 长度分组 / 分桶）与 `grad_clip`（norm / value / adaptive）。
+
 ```bash
-# SFT（默认不上报 W&B）
-python scripts/train.py training=sft data=gsm8k model=qwen2.5-7b
+# LoRA
+python scripts/train.py training=sft model=qwen2.5-0.5b data=gsm8k training.max_steps=20
 
-# DPO / GRPO
-python scripts/train.py training=dpo model=qwen2.5-7b
-python scripts/train.py training=grpo data=gsm8k model=qwen2.5-7b
+# Full（对照）
+python scripts/train.py training=sft model=qwen2.5-0.5b-full data=gsm8k training.max_steps=20
 
-# 开启 WandB（需先 wandb login 或设置 WANDB_API_KEY）
+# 切换采样 / 裁剪策略
+python scripts/train.py training=sft model=qwen2.5-0.5b \
+  training.sampler.mode=bucket training.grad_clip.strategy=norm
+```
+
+```bash
+python scripts/train.py training=sft data=gsm8k
+python scripts/train.py training=dpo data=dpo_demo
+python scripts/train.py training=grpo data=gsm8k
+
+# 开启 WandB
 python scripts/train.py training=dpo wandb=online
-# 离线缓存到 outputs/wandb，之后再 sync
 python scripts/train.py training=grpo wandb=offline
+
+# 从最新 checkpoint 接着训
+python scripts/train.py training=sft engineering.resume_from_checkpoint=true
+
+# 多卡
+torchrun --nproc_per_node=2 scripts/train.py training=grpo data=gsm8k
 ```
 
 ### 日志与产物
@@ -114,7 +134,7 @@ python scripts/train.py wandb=online wandb.project=my-ptl run_name=dpo-beta01
 ### 评测
 
 ```bash
-python scripts/eval.py eval=gsm8k model=qwen2.5-7b
+python scripts/eval.py eval=gsm8k model=qwen2.5-0.5b
 ```
 
 ### 消融实验
@@ -129,7 +149,9 @@ python scripts/ablation.py experiment=ablation
 |------|------|
 | `algorithms/dpo_loss.py` | 自研 DPO / IPO Loss，支持动态 β 与额外惩罚项 |
 | `algorithms/reward_functions.py` | GRPO 可插拔奖励函数引擎（准确率 / 格式 / 组合） |
-| `algorithms/grpo_utils.py` | GRPO 组内相对优势与采样辅助 |
+| `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL |
+| `trainers/ppo_trainer.py` | 基于 TRL `PPOTrainer` 的基线，仅用于和 GRPO 对比 |
+
 
 ## 实验结果
 

@@ -1,45 +1,67 @@
+"""GRPO 训练策略：完整自研实现（不调用 TRL GRPOTrainer）。"""
+
 from __future__ import annotations
 
-from typing import Any
+import logging
 
-from trl import GRPOConfig, GRPOTrainer
-
+from src.algorithms.grpo_engine import GRPOEngine
 from src.algorithms.reward_functions import build_reward_funcs
-from src.core.base import BaseTrainer, TrainResult
+from src.core.base import BaseTrainer, TrainContext, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
-from src.trainers.common import trainer_logging_kwargs
+
+logger = logging.getLogger("posttrainlab.grpo")
 
 
 @register(ALGORITHM_REGISTRY, "grpo")
 class GRPOStageTrainer(BaseTrainer):
-    def __init__(self, cfg: Any, model: Any, tokenizer: Any, dataset: Any):
-        super().__init__(cfg, model, tokenizer, dataset)
-        self.reward_fn = build_reward_funcs(cfg.training.reward)
+    """自研 GRPO。采样与损失在算法模块，日志/续训/分布式在基类。"""
 
-    def train(self) -> TrainResult:
-        tcfg = self.cfg.training
-        out_dir = f"{self.cfg.output_dir}/{tcfg.output_subdir}"
-        args = GRPOConfig(
-            output_dir=out_dir,
-            per_device_train_batch_size=tcfg.per_device_train_batch_size,
-            gradient_accumulation_steps=tcfg.gradient_accumulation_steps,
-            num_generations=tcfg.num_generations,
-            num_train_epochs=tcfg.num_train_epochs,
-            max_completion_length=tcfg.max_completion_length,
-            learning_rate=tcfg.learning_rate,
-            logging_steps=tcfg.logging_steps,
-            seed=self.cfg.seed,
-            save_strategy=tcfg.get("save_strategy", "no"),
-            **trainer_logging_kwargs(self.cfg),
+    name = "grpo"
+
+    def run_algorithm(self, ctx: TrainContext) -> TrainResult:
+        train_ds = ctx.train_dataset
+        rows = [train_ds[i] for i in range(len(train_ds))]
+        model = self.prepare_native_model(ctx.model, ctx.resume_from)
+        reward_fn = build_reward_funcs(ctx.config.training.reward)
+        tcfg = ctx.config.training
+
+        runtime = ctx.runtime
+        batch_size = int(tcfg.get("per_device_train_batch_size", 1))
+        epochs = int(tcfg.get("num_train_epochs", 1))
+        update_steps = self.estimate_update_steps(
+            len(rows),
+            batch_size,
+            epochs,
+            runtime.gradient_accumulation_steps,
         )
-        trainer = GRPOTrainer(
-            model=self.model,
-            args=args,
-            train_dataset=self.dataset,
-            reward_funcs=self.reward_fn,
-            processing_class=self.tokenizer,
+        optimizer, scheduler, scaler = self.build_optimizer_and_scheduler(model, update_steps)
+        engine = GRPOEngine(
+            model,
+            ctx.tokenizer,
+            reward_fn,
+            num_generations=int(tcfg.get("num_generations", 4)),
+            max_completion_length=int(tcfg.get("max_completion_length", 256)),
+            temperature=float(tcfg.get("temperature", 0.9)),
+            clip_range=float(tcfg.get("clip_range", 0.2)),
+            beta=float(tcfg.get("beta", 0.04)),
+            learning_rate=runtime.learning_rate,
+            num_iterations=int(tcfg.get("num_iterations", 1)),
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            mixed_precision=runtime.mixed_precision,
+            max_grad_norm=runtime.max_grad_norm,
         )
-        train_out = trainer.train()
-        metrics = dict(train_out.metrics) if train_out and train_out.metrics else {}
-        self.model = trainer.model
-        return TrainResult(metrics=metrics, checkpoint_dir=out_dir)
+        max_steps = tcfg.get("max_steps", None)
+        metrics = engine.train_loop(
+            rows,
+            epochs=epochs,
+            batch_size=batch_size,
+            grad_accum=runtime.gradient_accumulation_steps,
+            max_steps=None if max_steps in (None, "null") else int(max_steps),
+            logging_steps=int(tcfg.get("logging_steps", 5)),
+        )
+        out_dir = ctx.checkpoint_dir
+        self.save(model, ctx.tokenizer, out_dir)
+        logger.info("自研 GRPO 完成 steps=%s", metrics.get("train/steps"))
+        return TrainResult(metrics=metrics, checkpoint_dir=out_dir, extra={"impl": "native"})
