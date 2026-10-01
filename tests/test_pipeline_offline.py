@@ -1,4 +1,7 @@
-"""离线流水线：本地 JSONL → Sample → 版本 → 投影（无外网）。"""
+"""离线流水线：本地 JSONL → Sample → 版本 → 投影（无外网）。
+
+覆盖 SFT / DPO / GRPO（PPO 训练入口复用 grpo 投影字段）。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,13 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
         encoding="utf-8",
     )
+
+
+def _base_split_cleaning():
+    return {
+        "split": {"use_official_eval": False, "ratios": [0.7, 0.2, 0.1], "seed": 12},
+        "cleaning": {"dedup": True, "min_chars": 1, "filter_low_quality": True},
+    }
 
 
 def test_pipeline_instruction_to_sft_with_version(tmpdir):
@@ -49,8 +59,7 @@ def test_pipeline_instruction_to_sft_with_version(tmpdir):
             "max_train_samples": None,
             "max_eval_samples": None,
             "version": "v-toy",
-            "split": {"use_official_eval": False, "ratios": [0.7, 0.2, 0.1], "seed": 12},
-            "cleaning": {"dedup": True, "min_chars": 1, "filter_low_quality": True},
+            **_base_split_cleaning(),
         }
     )
     ds, meta = build_pipeline(
@@ -58,11 +67,85 @@ def test_pipeline_instruction_to_sft_with_version(tmpdir):
     )
     assert meta.version == "v-toy"
     assert "train" in ds and len(ds["train"]) > 0
-    assert "messages" in ds["train"][0]
+    row = ds["train"][0]
+    assert "messages" in row
+    roles = [m["role"] for m in row["messages"]]
+    assert "user" in roles and "assistant" in roles
 
     saved = load_version(version_root)
     assert saved.hash == meta.hash
     verify_version(saved, expected_version="v-toy", expected_hash=meta.hash[:12])
+
+
+def test_pipeline_dpo_pair_projection(tmpdir):
+    tmp_path = Path(str(tmpdir))
+    data_path = tmp_path / "dpo.jsonl"
+    _write_jsonl(
+        data_path,
+        [
+            {"prompt": f"问题{i}", "chosen": f"好答{i}", "rejected": f"差答{i}"}
+            for i in range(1, 11)
+        ],
+    )
+    version_root = tmp_path / "versions"
+    cfg = OmegaConf.create(
+        {
+            "name": "toy_dpo",
+            "format": "dpo_pair",
+            "source": str(data_path),
+            "system_prompt": "sys",
+            "version": "v-dpo",
+            **_base_split_cleaning(),
+        }
+    )
+    ds, meta = build_pipeline(
+        cfg, algorithm="dpo", seed=12, version_dir=version_root
+    )
+    assert meta.version == "v-dpo"
+    assert "train" in ds and len(ds["train"]) > 0
+    row = ds["train"][0]
+    assert set(row.keys()) >= {"prompt", "chosen", "rejected"}
+    assert row["prompt"][0]["role"] == "system"
+    assert row["prompt"][-1]["role"] == "user"
+    assert row["chosen"][0]["role"] == "assistant"
+    assert row["rejected"][0]["role"] == "assistant"
+    assert "好答" in row["chosen"][0]["content"]
+    assert "差答" in row["rejected"][0]["content"]
+
+
+def test_pipeline_gsm8k_to_grpo_projection(tmpdir):
+    """GRPO（及 PPO 入口复用的投影）需要 prompt + ground_truth。"""
+    tmp_path = Path(str(tmpdir))
+    data_path = tmp_path / "gsm8k_toy.jsonl"
+    _write_jsonl(
+        data_path,
+        [
+            {"question": f"{i}+{i}?", "answer": f"step\n#### {i + i}"}
+            for i in range(1, 11)
+        ],
+    )
+    version_root = tmp_path / "versions"
+    cfg = OmegaConf.create(
+        {
+            "name": "toy_grpo",
+            "format": "gsm8k",
+            "source": str(data_path),
+            "system_prompt": "math sys",
+            "version": "v-grpo",
+            **_base_split_cleaning(),
+        }
+    )
+    ds, meta = build_pipeline(
+        cfg, algorithm="grpo", seed=12, version_dir=version_root
+    )
+    assert meta.version == "v-grpo"
+    assert "train" in ds and len(ds["train"]) > 0
+    row = ds["train"][0]
+    assert "prompt" in row and "ground_truth" in row
+    assert row["prompt"][0]["role"] == "system"
+    assert row["prompt"][-1]["role"] == "user"
+    assert row["ground_truth"] is not None
+    assert str(row["ground_truth"]).isdigit()
 
 
 def test_pipeline_expected_hash_mismatch(tmpdir):

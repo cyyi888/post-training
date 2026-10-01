@@ -7,30 +7,32 @@ defaults:
 
 experiment:
   name: ablation_dpo_beta
-  description: "Ablate DPO beta / loss_type / penalty"
+  description: "Ablate DPO/IPO + fixed/dynamic beta"
   track_wandb: false
   variants:
-    - name: dpo_beta_0.1
+    - name: dpo_fixed_beta_0.1
       overrides:
         training.loss_type: dpo
-        training.beta: 0.1
-        training.dynamic_beta: false
+        training.beta_mode: fixed
+        training.fixed_beta: 0.1
         training.penalty.enabled: false
-    - name: dpo_beta_0.5
+    - name: dpo_fixed_beta_0.5
       overrides:
         training.loss_type: dpo
-        training.beta: 0.5
-        training.dynamic_beta: false
+        training.beta_mode: fixed
+        training.fixed_beta: 0.5
         training.penalty.enabled: false
-    - name: ipo_beta_0.1
+    - name: ipo_fixed_beta_0.1
       overrides:
         training.loss_type: ipo
-        training.beta: 0.1
-        training.dynamic_beta: false
+        training.beta_mode: fixed
+        training.fixed_beta: 0.1
+        training.margin: 1.0
         training.penalty.enabled: false
-    - name: dpo_dynamic_beta_penalty
+    - name: dpo_dynamic_beta
       overrides:
         training.loss_type: dpo
-        training.dynamic_beta: true
-        training.penalty.enabled: true
-        training.penalty.weight: 0.01
+        training.beta_mode: dynamic
+        training.dynamic_beta.init_beta: 0.1
+        training.dynamic_beta.target_kl: 4.0
+        training.penalty.enabled: false

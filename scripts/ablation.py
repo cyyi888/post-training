@@ -22,12 +22,18 @@ logger = logging.getLogger("posttrainlab.ablation")
 
 
 def _dry_run(cfg, variant_name: str) -> dict:
-    """	config fingerprint：只记录关键配置字段，不实际占用 GPU。"""
+    """占位训练钩子：只记录关键配置字段，不实际占用 GPU。"""
     t = cfg.get("training", {})
+    beta_mode = t.get("beta_mode")
+    if beta_mode is None:
+        dyn = t.get("dynamic_beta", False)
+        beta_mode = "dynamic" if dyn is True else ("fixed" if dyn is False else "dynamic")
+    fixed_beta = t.get("fixed_beta", t.get("beta", 0.0))
     metrics = {
         "loss_type": str(t.get("loss_type", "")),
-        "beta": float(t.get("beta", 0.0) or 0.0),
-        "dynamic_beta": bool(t.get("dynamic_beta", False)),
+        "beta": float(fixed_beta or 0.0),
+        "beta_mode": str(beta_mode),
+        "dynamic_beta": str(beta_mode) == "dynamic",
         "penalty_enabled": bool(t.get("penalty", {}).get("enabled", False))
         if t.get("penalty")
         else False,

@@ -2,6 +2,14 @@
 
 统一的大模型后训练实验平台：SFT → DPO/IPO → GRPO，配合 Hydra 分层配置与消融实验调度。
 
+## 硬性约定：模型只用 Qwen2.5-0.5B
+
+**本仓库基座模型固定为 `Qwen/Qwen2.5-0.5B-Instruct`（配置见 `configs/model/qwen2.5-0.5b.yaml` / `qwen2.5-0.5b-full.yaml`）。**
+
+- 训练、评测、消融、集成/冒烟测试 **一律只用该模型**（Full 或 LoRA 变体均可，仍是同一权重族）。
+- **禁止**为省事引入 GPT-2、tiny-*、其它随机小模型或第三方基座作为替代。
+- 改代码、补测试、写脚本、改文档时都要遵守；需要更小算力时用 `max_steps` / 截断长度 / LoRA，而不是换模型。
+
 ## 架构
 
 ```
@@ -11,8 +19,8 @@ PostTrainLab/
 │   ├── core/         # 统一基类与接口
 │   ├── data/         # 统一 Sample 流水线：适配器/清洗/划分/版本/Chat Template
 │   ├── models/       # 模型加载、LoRA
-│   ├── algorithms/   # 自研 DPO/IPO Loss、GRPO 奖励引擎
-│   ├── trainers/     # SFT / DPO / GRPO 训练器
+│   ├── algorithms/   # 自研 DPO/IPO Loss、动态 β、GRPO、SFT 采样/裁剪
+│   ├── trainers/     # SFT(TRL) / DPO(TRL+自研Loss) / GRPO / PPO(TRL 基线)
 │   ├── evaluators/   # 任务评测与报告
 │   ├── experiment/   # 消融调度与追踪
 │   └── utils/        # 通用工具
@@ -100,6 +108,39 @@ python scripts/train.py training=sft model=qwen2.5-0.5b \
   training.sampler.mode=bucket training.grad_clip.strategy=norm
 ```
 
+#### DPO / IPO（TRL + 自研 Loss / 动态 β）
+
+基于 `trl.DPOTrainer` 扩展；自研 `dpo_losses`（DPO / IPO 合页）与 `DynamicBetaController`。配置一键切换：
+
+```bash
+# 标准 DPO + 动态 β
+python scripts/train.py training=dpo data=dpo_demo wandb=online
+
+# IPO + 固定 β
+python scripts/train.py training=dpo data=dpo_demo \
+  training.loss_type=ipo training.beta_mode=fixed training.fixed_beta=0.1
+
+# DPO + 固定 β
+python scripts/train.py training=dpo data=dpo_demo \
+  training.loss_type=dpo training.beta_mode=fixed training.fixed_beta=0.5
+```
+
+WandB 关注曲线：`train/loss`、`train/mean_kl`、`train/beta`（以及 `val/loss`、`val/mean_kl`）。
+
+离线流水线测试（**需要 GPU**；无 CUDA 会自动 skip）：
+
+```bash
+pytest tests/test_dpo_pipeline.py -v
+# 仅跑 GPU 冒烟
+pytest tests/test_dpo_pipeline.py::test_dpo_pipeline_trl_train_smoke_gpu -v
+```
+
+Loss / 动态 β 纯逻辑单测（CPU 即可）：
+
+```bash
+pytest tests/test_dpo_losses.py -q
+```
+
 ```bash
 python scripts/train.py training=sft data=gsm8k
 python scripts/train.py training=dpo data=dpo_demo
@@ -147,7 +188,7 @@ python scripts/ablation.py experiment=ablation
 
 | 模块 | 说明 |
 |------|------|
-| `algorithms/dpo_loss.py` | 自研 DPO / IPO Loss，支持动态 β 与额外惩罚项 |
+| `algorithms/dpo_losses.py` + `dynamic_beta.py` | 自研 DPO / IPO Loss + 动态 β；训练见 `trainers/dpo_trainer`（TRL/`Accelerate`，无自研循环） |
 | `algorithms/reward_functions.py` | GRPO 可插拔奖励函数引擎（准确率 / 格式 / 组合） |
 | `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL |
 | `trainers/ppo_trainer.py` | 基于 TRL `PPOTrainer` 的基线，仅用于和 GRPO 对比 |

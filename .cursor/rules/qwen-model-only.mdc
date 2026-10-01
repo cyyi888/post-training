@@ -1,0 +1,13 @@
+---
+description: 基座模型只能用 Qwen2.5-0.5B，禁止引入其它模型
+alwaysApply: true
+---
+
+# 模型硬性约定
+
+本项目基座模型 **只能** 使用 `Qwen/Qwen2.5-0.5B-Instruct`（见 `configs/model/qwen2.5-0.5b.yaml` / `qwen2.5-0.5b-full.yaml`）。
+
+- 训练、评测、消融、单元/集成/冒烟测试一律使用该模型（允许 Full / LoRA，不得换基座）。
+- **禁止**引入 GPT-2、tiny-*、随机小模型或其它 Hugging Face 基座作为替代。
+- 需要降算力时：缩短 `max_steps` / `max_length`、开 LoRA，而不是换模型。
+- 详见 README「硬性约定：模型只用 Qwen2.5-0.5B」。
