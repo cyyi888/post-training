@@ -34,6 +34,16 @@ class RuntimeOptions:
     max_grad_norm: float = 1.0
 
 
+# 阶段名 → training.output_subdir（供 init_from_checkpoint=sft|dpo|… 解析）
+STAGE_CHECKPOINT_SUBDIRS: dict[str, str] = {
+    "sft": "checkpoints/sft",
+    "dpo": "checkpoints/dpo",
+    "grpo": "checkpoints/grpo",
+    "grpo_humaneval": "checkpoints/grpo_humaneval",
+    "ppo": "checkpoints/ppo",
+}
+
+
 @dataclass
 class TrainContext:
     """一次训练的工程上下文，由基类组装后交给算法。"""
@@ -46,6 +56,7 @@ class TrainContext:
     tokenizer: Any
     checkpoint_dir: str
     resume_from: str | None = None
+    init_from: str | None = None
     hf_args: dict[str, Any] = field(default_factory=dict)
     runtime: RuntimeOptions = field(default_factory=RuntimeOptions)
 
@@ -76,10 +87,11 @@ class BaseTrainer(ABC):
         try:
             ctx = self.build_context(config, dataset)
             self.logger.info(
-                "开始 %s | rank %s/%s | resume=%s | accum=%s | amp=%s | scheduler=%s",
+                "开始 %s | rank %s/%s | init_from=%s | resume=%s | accum=%s | amp=%s | scheduler=%s",
                 self.name,
                 self.global_rank,
                 self.world_size,
+                ctx.init_from,
                 ctx.resume_from,
                 ctx.runtime.gradient_accumulation_steps,
                 ctx.runtime.mixed_precision,
@@ -350,6 +362,11 @@ class BaseTrainer(ABC):
         model = self.apply_gradient_checkpointing(model, self.runtime.gradient_checkpointing)
         out_dir = self.checkpoint_dir(config)
         resume_from = self.resolve_resume(config, out_dir)
+        # 同阶段续训优先；跨阶段冷启动用 init_from（二者勿混用）
+        init_from = None if resume_from else self.resolve_init_from(config)
+        if init_from:
+            model = self.load_init_checkpoint(model, init_from, config)
+            self.logger.info("从上游 checkpoint 冷启动: %s", init_from)
         if resume_from:
             self.logger.info("将从 checkpoint 续训: %s", resume_from)
         self.logger.info(
@@ -371,6 +388,7 @@ class BaseTrainer(ABC):
             tokenizer=tokenizer,
             checkpoint_dir=out_dir,
             resume_from=resume_from,
+            init_from=init_from,
             hf_args=self._safe_hf_kwargs(config),
             runtime=self.runtime,
         )
@@ -388,6 +406,33 @@ class BaseTrainer(ABC):
         path = Path(str(flag))
         if not path.exists():
             self.logger.warning("指定的 checkpoint 不存在: %s", path)
+            return None
+        return str(path)
+
+    def resolve_init_from(self, config: Any) -> str | None:
+        """
+        ``engineering.init_from_checkpoint``：跨阶段冷启动权重。
+
+        - null：从基座（+ 新 LoRA）开始
+        - ``sft`` / ``dpo`` / ``grpo`` / ``ppo``：取 ``{output_dir}/checkpoints/<stage>`` 下最新
+        - 其它字符串：视为目录路径（可含 checkpoint-*）
+        """
+        flag = self._engineering(config).get("init_from_checkpoint", None)
+        if flag in (None, False, "", "null", "none", "false"):
+            return None
+        key = str(flag).strip().lower()
+        if key in STAGE_CHECKPOINT_SUBDIRS:
+            root = Path(str(config.get("output_dir", "outputs"))) / STAGE_CHECKPOINT_SUBDIRS[key]
+            found = self.latest_checkpoint(str(root))
+            if not found:
+                self.logger.warning("上游阶段 '%s' 无可用 checkpoint: %s", key, root)
+            return found
+        path = Path(str(flag))
+        if path.is_dir():
+            found = self.latest_checkpoint(str(path))
+            return found or str(path)
+        if not path.exists():
+            self.logger.warning("指定的 init_from_checkpoint 不存在: %s", path)
             return None
         return str(path)
 
@@ -409,17 +454,63 @@ class BaseTrainer(ABC):
             return str(root)
         return None
 
+    def load_init_checkpoint(self, model: Any, init_from: str | None, config: Any) -> Any:
+        """加载上游阶段权重作为本阶段起点（不恢复 optimizer / trainer_state）。"""
+        if not init_from:
+            return model
+        path = Path(init_from)
+        if not path.exists():
+            self.logger.warning("init_from_checkpoint 路径不存在: %s", path)
+            return model
+
+        if (path / "adapter_config.json").is_file():
+            self.logger.info("加载上游 LoRA adapter: %s", path)
+            return self._load_peft_adapter(model, path)
+
+        if (path / "config.json").is_file():
+            from src.models.loader import load_model_and_tokenizer
+            from src.models.lora import apply_lora
+
+            self.logger.info("加载上游全量 checkpoint: %s", path)
+            model, _ = load_model_and_tokenizer(
+                str(path),
+                use_gpu=config.get("use_gpu", True),
+                torch_dtype=config.model.get("torch_dtype"),
+                trust_remote_code=config.model.get("trust_remote_code", True),
+                chat_cfg=config.get("chat_template"),
+            )
+            if config.model.get("use_lora", False):
+                model = apply_lora(model, config.model.lora)
+                if hasattr(model, "print_trainable_parameters"):
+                    model.print_trainable_parameters()
+            return model
+
+        self.logger.warning("无法识别的 checkpoint 目录（缺 adapter_config.json / config.json）: %s", path)
+        return model
+
     def load_adapter_resume(self, model: Any, resume_from: str | None) -> Any:
-        """若目录里是 LoRA adapter，则加载到当前模型上。"""
+        """若目录里是 LoRA adapter，则加载到当前模型上（同阶段续训）。"""
         if not resume_from:
             return model
         path = Path(resume_from)
         if not (path / "adapter_config.json").is_file():
             return model
+        self.logger.info("加载 LoRA checkpoint: %s", path)
+        return self._load_peft_adapter(model, path)
+
+    def _load_peft_adapter(self, model: Any, path: Path) -> Any:
         from peft import PeftModel
 
-        self.logger.info("加载 LoRA checkpoint: %s", path)
-        return PeftModel.from_pretrained(model, str(path))
+        base = model.get_base_model() if hasattr(model, "get_base_model") else model
+        try:
+            loaded = PeftModel.from_pretrained(base, str(path), is_trainable=True)
+        except TypeError:
+            loaded = PeftModel.from_pretrained(base, str(path))
+            for name, p in loaded.named_parameters():
+                if "lora_" in name:
+                    p.requires_grad = True
+        loaded.train()
+        return loaded
 
     def save(self, model: Any, tokenizer: Any, path: str) -> None:
         """仅主进程保存；若模型被 DDP 包裹则保存内部模块。"""

@@ -5,7 +5,10 @@
 
 __all__ = [
     "DPOLoss",
+    "DPOLossConfig",
     "compute_dpo_loss",
+    "compute_ipo_loss",
+    "compute_preference_loss",
     "compute_variant_loss",
     "dpo_loss",
     "ipo_loss",
@@ -13,29 +16,34 @@ __all__ = [
     "compute_grpo_loss",
     "RewardEngine",
     "build_reward_funcs",
+    "GRPORolloutPipeline",
+    "RolloutConfig",
     "build_sft_sampler",
     "LengthGroupedSampler",
     "build_grad_clipper",
 ]
 
+_DPO_LOSS_EXPORTS = {
+    "DPOLoss",
+    "DPOLossConfig",
+    "compute_dpo_loss",
+    "compute_ipo_loss",
+    "compute_preference_loss",
+    "compute_variant_loss",
+    "dpo_loss",
+    "ipo_loss",
+}
+
 
 def __getattr__(name: str):
-    if name in ("DPOLoss", "compute_dpo_loss"):
-        from .dpo_loss import DPOLoss, compute_dpo_loss
+    if name in _DPO_LOSS_EXPORTS:
+        from . import dpo_losses as _dpo
 
-        return {"DPOLoss": DPOLoss, "compute_dpo_loss": compute_dpo_loss}[name]
-    if name in ("dpo_loss", "ipo_loss"):
-        from .dpo_losses import dpo_loss, ipo_loss
-
-        return {"dpo_loss": dpo_loss, "ipo_loss": ipo_loss}[name]
+        return getattr(_dpo, name)
     if name == "DynamicBetaController":
         from .dynamic_beta import DynamicBetaController
 
         return DynamicBetaController
-    if name == "compute_variant_loss":
-        from .dpo_variants import compute_variant_loss
-
-        return compute_variant_loss
     if name == "compute_grpo_loss":
         from .grpo_loss import compute_grpo_loss
 
@@ -46,6 +54,13 @@ def __getattr__(name: str):
         return {
             "RewardEngine": RewardEngine,
             "build_reward_funcs": build_reward_funcs,
+        }[name]
+    if name in ("GRPORolloutPipeline", "RolloutConfig"):
+        from .rollout import GRPORolloutPipeline, RolloutConfig
+
+        return {
+            "GRPORolloutPipeline": GRPORolloutPipeline,
+            "RolloutConfig": RolloutConfig,
         }[name]
     if name in ("build_sft_sampler", "LengthGroupedSampler"):
         from .sft_samplers import LengthGroupedSampler, build_sft_sampler

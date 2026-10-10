@@ -1,4 +1,7 @@
-"""策略模式：BaseTrainer 接口与工厂基础测试（不依赖 GPU）。"""
+"""【设备：CPU】BaseTrainer 接口、工厂注册与工程辅助单测。
+
+原因：只断言策略注册、split / checkpoint 等胶水逻辑，不跑真实训练步，无需 CUDA。
+"""
 
 from __future__ import annotations
 
@@ -90,6 +93,36 @@ def test_latest_checkpoint_picks_highest_step(tmpdir):
     (root / "checkpoint-2").mkdir()
     (root / "checkpoint-10").mkdir()
     assert BaseTrainer.latest_checkpoint(str(root)).endswith("checkpoint-10")
+
+
+def test_resolve_init_from_stage_alias(tmpdir):
+    root = Path(str(tmpdir))
+    sft = root / "checkpoints" / "sft" / "checkpoint-3"
+    sft.mkdir(parents=True)
+    (sft / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+    trainer = _toy()
+    cfg = _Cfg(
+        output_dir=str(root),
+        engineering=_Cfg(init_from_checkpoint="sft", resume_from_checkpoint=None),
+    )
+    found = trainer.resolve_init_from(cfg)
+    assert found is not None
+    assert found.endswith("checkpoint-3")
+
+
+def test_resolve_init_from_skipped_when_resume(tmpdir):
+    """resume 优先时 build_context 不应再解析 init（此处测 resolve 本身仍可读）。"""
+    root = Path(str(tmpdir))
+    dpo = root / "checkpoints" / "dpo"
+    dpo.mkdir(parents=True)
+    (dpo / "adapter_config.json").write_text("{}", encoding="utf-8")
+    trainer = _toy()
+    cfg = _Cfg(
+        output_dir=str(root),
+        engineering=_Cfg(init_from_checkpoint="dpo"),
+    )
+    assert trainer.resolve_init_from(cfg) == str(dpo)
 
 
 def test_distributed_none_ignores_env(monkeypatch):
@@ -263,10 +296,17 @@ def test_scheduler_warmup_then_decay():
         mixed_precision="no",
     )
     model = torch.nn.Linear(2, 2)
-    _opt, scheduler, scaler = trainer.build_optimizer_and_scheduler(model, num_update_steps=4)
+    opt, scheduler, scaler = trainer.build_optimizer_and_scheduler(model, num_update_steps=4)
     assert scaler is None
+    # warmup=2：构造后 last_epoch=0 → lr_lambda(0)=0.5
     assert abs(scheduler.get_last_lr()[0] - 0.5) < 1e-5
-    scheduler.step()
+    # 现代 PyTorch 要求先 optimizer.step() 再 scheduler.step()
+    opt.step()
+    scheduler.step()  # last_epoch=1 → warmup 结束，lr=1.0
     assert abs(scheduler.get_last_lr()[0] - 1.0) < 1e-5
-    scheduler.step()
+    opt.step()
+    scheduler.step()  # last_epoch=2 → decay 起点 progress=0，仍为 1.0
+    assert abs(scheduler.get_last_lr()[0] - 1.0) < 1e-5
+    opt.step()
+    scheduler.step()  # last_epoch=3 → linear decay，lr < 1
     assert scheduler.get_last_lr()[0] < 1.0

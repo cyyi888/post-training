@@ -15,8 +15,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.algorithms.dpo_loss import DPOLossConfig
-from src.algorithms.dpo_losses import compute_preference_loss
+from src.algorithms.dpo_losses import DPOLossConfig, compute_preference_loss
 from src.algorithms.dynamic_beta import DynamicBetaController
 from src.core.base import BaseTrainer, TrainContext, TrainResult
 from src.core.registry import ALGORITHM_REGISTRY, register
@@ -432,6 +431,9 @@ class DPOStageTrainer(BaseTrainer):
         metrics["dpo/configured_beta"] = float(getattr(trainer, "beta", loss_cfg.beta))
         metrics["dpo/dynamic_beta"] = 1.0 if loss_cfg.resolved_beta_mode() == "dynamic" else 0.0
         metrics["dpo/loss_type"] = 0.0 if loss_cfg.loss_type == "dpo" else 1.0
+        if ctx.init_from:
+            metrics["dpo/init_from"] = 1.0
+            logger.info("DPO 自上游冷启动: %s", ctx.init_from)
         self.save(getattr(trainer, "model", model), ctx.tokenizer, out_dir)
         if beta_controller is not None:
             Path(out_dir).mkdir(parents=True, exist_ok=True)

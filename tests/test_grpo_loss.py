@@ -1,4 +1,8 @@
-"""自研 GRPO loss 的数值测试（只需 torch）。"""
+"""【设备：CPU】自研 GRPO loss / 组内优势的公式与数值单测。
+
+原因：只验证 clip、KL、优势标准化与反向传播的数学行为，用小张量即可，
+不加载基座模型，无需 CUDA。有 GPU 时也可跑，但不依赖 GPU。
+"""
 
 from __future__ import annotations
 
@@ -43,7 +47,7 @@ def test_positive_advantage_prefers_higher_logprob():
 def test_kl_increases_loss_when_policy_drifts():
     policy = torch.zeros(2, 2, requires_grad=True)
     old = torch.zeros(2, 2)
-    ref = torch.full((2, 2), -1.0)  # 参考与当前差一截
+    ref = torch.full((2, 2), -1.0)
     adv = torch.zeros(2)
     mask = torch.ones(2, 2)
     no_kl, m0 = compute_grpo_loss(policy, old, adv, mask, ref_logps=ref, beta=0.0)

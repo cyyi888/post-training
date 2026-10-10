@@ -1,10 +1,9 @@
-"""DPO 流水线 GPU 测试。
+"""【设备：GPU / CUDA】DPO 端到端流水线与 TRL 短训冒烟。
 
-无 CUDA 时整文件 skip。覆盖：
-- 偏好数据投影
-- Loss / 动态 β（张量在 GPU 上）
-- WandB report_to 与策略注册
-- TRL ``CustomDPOTrainer`` 短步训练冒烟（**仅** ``Qwen/Qwen2.5-0.5B-Instruct`` + LoRA）
+原因：需在 GPU 上跑偏好 Loss 张量与 ``Qwen/Qwen2.5-0.5B-Instruct`` + LoRA
+的 TRL ``CustomDPOTrainer`` 短步训练，验证整条向量化训练链。无 CUDA 时整文件 skip。
+
+纯公式 / 动态 β 单测见 ``tests/test_dpo_losses.py``（CPU）。
 """
 
 from __future__ import annotations

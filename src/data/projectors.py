@@ -34,18 +34,29 @@ def project_dpo(samples: list[Sample]) -> Dataset:
 
 
 def project_grpo(samples: list[Sample]) -> Dataset:
+    """投影 GRPO / PPO 在线 RL 字段。
+
+    除 ``prompt`` / ``ground_truth`` 外，透传 HumanEval 的 ``test`` / ``entry_point``
+    与原始 ``task_prompt``（代码题函数签名），供 ``code`` 奖励执行测例。
+    """
     rows = []
     for s in samples:
         prompt = []
         if s.system:
             prompt.append({"role": "system", "content": s.system})
         prompt.append({"role": "user", "content": s.prompt})
-        rows.append(
-            {
-                "prompt": prompt,
-                "ground_truth": s.metadata.get("ground_truth"),
-            }
-        )
+        row: dict[str, Any] = {
+            "prompt": prompt,
+            "ground_truth": s.metadata.get("ground_truth"),
+            "task_prompt": s.prompt,
+            "source_format": s.metadata.get("source_format"),
+        }
+        # HumanEval / 代码题元数据（缺失时为 None，数学题不受影响）
+        if "entry_point" in s.metadata:
+            row["entry_point"] = s.metadata.get("entry_point")
+        if "test" in s.metadata:
+            row["test"] = s.metadata.get("test")
+        rows.append(row)
     return Dataset.from_list(rows) if rows else Dataset.from_list([])
 
 

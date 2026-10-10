@@ -41,6 +41,8 @@ flowchart LR
   Proj --> Trainer
   ChatTpl[Chat Template] --> Trainer
   ChatTpl --> Eval[evaluators]
+  SFT[SFT] -->|init_from| DPO[DPO]
+  DPO -->|init_from| RL[GRPO/PPO]
 ```
 
 ## 数据流水线
@@ -141,6 +143,77 @@ Loss / 动态 β 纯逻辑单测（CPU 即可）：
 pytest tests/test_dpo_losses.py -q
 ```
 
+#### GRPO（自研完整 Rollout）与 PPO（TRL 对照）
+
+GRPO **不调用** `trl.GRPOTrainer`。在线采样走自研 6 步管线（[`src/algorithms/rollout.py`](src/algorithms/rollout.py)）：
+
+1. **固定档分桶 + 动态 batch**（默认 128/256/512；短档大 batch、长档小 batch）
+2. 批量 `generate`（`no_grad` + `eval`；Hydra 配置 `temperature` / `top_p` / `top_k` / `num_generations`；批后清 KV）
+3. 后处理：解码清洗；答案支持 `\boxed{}` 与 GSM8K `####`；过短/过长丢弃；槽位拒绝采样 + **有效不足半组时整组重采**
+4. 分层奖励：正确性 + 格式 + 长度 + **逐步过程分** + **代码测例**（[`reward_functions.py`](src/algorithms/reward_functions.py)）
+5. 组内相对优势归一化，组装 `input_ids` / mask / reward / advantage（另附 `prompt_ids` / `answer_ids`）
+6. 指标：奖励 mean/max/min/std、合格率、tok/s、batch 耗时、峰值显存 → WandB（`rollout/*`）
+
+随后由 [`GRPOEngine`](src/algorithms/grpo_engine.py) 做 clip + KL 更新。
+
+PPO 与 GRPO **共用** `RewardEngine`；默认 `ppo.online_loop=true` 走 generate → 奖励 → `PPOTrainer.step`（保证 `ground_truth` / 测例元数据可用）。完整 6 步 Rollout + 组内优势仍以 GRPO 为主路径。
+
+```bash
+# GRPO 主路径（GSM8K：含 steps 逐步奖励）
+python scripts/train.py training=grpo data=gsm8k training.max_steps=20
+
+# HumanEval / 代码题（code 编译+测例奖励）
+python scripts/train.py training=grpo_humaneval data=humaneval training.max_steps=20
+
+# 关闭分桶 / 调整拒绝采样与核采样
+python scripts/train.py training=grpo data=gsm8k \
+  training.rollout.bucket=false training.rollout.max_resample=1 \
+  training.rollout.top_p=0.9 training.rollout.top_k=50
+
+# 消融对比时固定生成种子
+python scripts/train.py training=grpo data=gsm8k \
+  training.rollout.fix_generation_seed=true training.rollout.generation_seed=42
+
+# PPO 对照基线（需环境含 TRL PPOTrainer；可接上游 DPO 权重）
+python scripts/train.py training=ppo data=gsm8k training.max_steps=20 \
+  engineering.init_from_checkpoint=dpo
+```
+
+#### SFT → DPO → RL 完整链路
+
+跨阶段用 `engineering.init_from_checkpoint` **只加载权重、步数从 0 开始**（与同阶段 `resume_from_checkpoint` 续训区分）。别名 `sft` / `dpo` / `grpo` / `ppo` 指向 `outputs/checkpoints/<stage>` 下最新目录。
+
+```bash
+# 一键链路（默认 max_steps=20 冒烟；末段 rl_algorithm=grpo）
+python scripts/pipeline.py
+python scripts/pipeline.py pipeline.dry_run=true          # 只打印命令
+python scripts/pipeline.py pipeline.rl_algorithm=ppo      # 末段改 PPO
+python scripts/pipeline.py pipeline.max_steps=null        # 按各 yaml 正式训
+
+# 或分阶段手动衔接
+python scripts/train.py training=sft data=gsm8k training.max_steps=20
+python scripts/train.py training=dpo data=dpo_demo \
+  engineering.init_from_checkpoint=sft training.max_steps=20
+python scripts/train.py training=grpo data=gsm8k \
+  engineering.init_from_checkpoint=dpo training.max_steps=20
+```
+
+### 测试分层
+
+- **CPU（轻量，无 CUDA 也应全绿）**：公式 / 奖励 / Rollout 控制流 / 数据流水线 / 策略注册等。
+- **GPU（无 CUDA 自动 skip；基座仅 Qwen2.5-0.5B）**：DPO / GRPO / PPO 端到端短训冒烟。
+
+```bash
+# CPU 轻量（日常）
+pytest tests/test_dpo_losses.py tests/test_grpo_loss.py tests/test_rewards.py \
+  tests/test_rollout.py tests/test_data_pipeline.py tests/test_pipeline_offline.py \
+  tests/test_pipeline_chain.py tests/test_sft_baseline.py tests/test_trainers_strategy.py \
+  tests/test_versioning.py tests/test_wandb_utils.py -q
+
+# GPU 流水线冒烟
+pytest tests/test_dpo_pipeline.py tests/test_grpo_pipeline.py tests/test_ppo_pipeline.py -v
+```
+
 ```bash
 python scripts/train.py training=sft data=gsm8k
 python scripts/train.py training=dpo data=dpo_demo
@@ -188,11 +261,12 @@ python scripts/ablation.py experiment=ablation
 
 | 模块 | 说明 |
 |------|------|
-| `algorithms/dpo_losses.py` + `dynamic_beta.py` | 自研 DPO / IPO Loss + 动态 β；训练见 `trainers/dpo_trainer`（TRL/`Accelerate`，无自研循环） |
-| `algorithms/reward_functions.py` | GRPO 可插拔奖励函数引擎（准确率 / 格式 / 组合） |
-| `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL |
-| `trainers/ppo_trainer.py` | 基于 TRL `PPOTrainer` 的基线，仅用于和 GRPO 对比 |
-
+| `algorithms/dpo_losses.py` + `dynamic_beta.py` | 自研 DPO / IPO（公式+Config+兼容入口）+ 动态 β；`dpo_loss` / `dpo_variants` 为再导出；训练见 `trainers/dpo_trainer` |
+| `algorithms/reward_functions.py` | GRPO 可插拔奖励：accuracy / format / length / **steps（逐步）** / **code（编译+测例）** |
+| `algorithms/rollout.py` | GRPO 6 步 Rollout：分桶、批量生成、拒绝采样、组内组装、指标 |
+| `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL；引擎消费 AssembledBatch |
+| `trainers/ppo_trainer.py` | TRL `PPOTrainer` + 自研奖励在线循环；与 GRPO 对照消融 |
+| `scripts/pipeline.py` | SFT→DPO→RL 一键链路（`init_from_checkpoint` 衔接） |
 
 ## 实验结果
 

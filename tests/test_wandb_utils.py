@@ -1,4 +1,7 @@
-"""Tests for report_to / run_name resolution (no GPU)."""
+"""【设备：CPU】W&B report_to / run_name 解析单测。
+
+原因：只测配置映射字符串，不初始化真实 W&B run，无需 CUDA。
+"""
 
 from omegaconf import OmegaConf
 

@@ -1,6 +1,7 @@
-"""离线流水线：本地 JSONL → Sample → 版本 → 投影（无外网）。
+"""【设备：CPU】离线数据流水线：本地 JSONL → Sample → 版本 → 投影。
 
-覆盖 SFT / DPO / GRPO（PPO 训练入口复用 grpo 投影字段）。
+原因：只做适配 / 清洗 / 划分 / 投影，无模型前向，无需 CUDA、无外网。
+覆盖 SFT / DPO / GRPO（PPO 入口复用 grpo 投影字段）。
 """
 
 from __future__ import annotations

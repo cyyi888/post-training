@@ -37,22 +37,3 @@ def group_relative_advantages(
     std = grouped.std(dim=1, unbiased=False, keepdim=True)
     adv = (grouped - mean) / (std + eps)
     return adv.view(-1)
-
-
-def flatten_completions(completions: list, num_generations: int) -> list:
-    """Ensure completions are a flat list of length B*G."""
-    if len(completions) == 0:
-        return completions
-    # Already flat
-    if not isinstance(completions[0], list) or (
-        isinstance(completions[0], list)
-        and completions[0]
-        and isinstance(completions[0][0], dict)
-    ):
-        return completions
-    flat = []
-    for group in completions:
-        flat.extend(group)
-    if len(flat) % num_generations != 0:
-        raise ValueError("flattened completions length mismatch with num_generations")
-    return flat

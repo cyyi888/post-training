@@ -1,0 +1,30 @@
+# @package _global_
+# SFT → DPO → RL 完整链路（scripts/pipeline.py）
+defaults:
+  - /base
+  - override /wandb: disabled
+  - _self_
+
+pipeline:
+  name: sft_dpo_rl
+  # 冒烟步数；正式训练覆盖为 null：pipeline.max_steps=null
+  max_steps: 20
+  # 末段：grpo（自研在线 RL 主路径）或 ppo（TRL 对照）
+  rl_algorithm: grpo
+  # true 只打印将要执行的命令，不训练
+  dry_run: false
+  stages:
+    - name: sft
+      overrides:
+        - training=sft
+        - data=gsm8k
+    - name: dpo
+      init_from: sft
+      overrides:
+        - training=dpo
+        - data=dpo_demo
+    - name: rl
+      init_from: dpo
+      # training= 由 rl_algorithm 注入；此处只补数据等
+      overrides:
+        - data=gsm8k

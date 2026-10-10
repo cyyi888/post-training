@@ -23,7 +23,11 @@ run_name: null
 # 与算法无关的工程开关（由 BaseTrainer 读取）
 # null 表示沿用 configs/training/*.yaml 里的同名字段
 engineering:
+  # 同阶段续训（恢复 trainer_state / optimizer）；true → 扫当前 output_subdir
   resume_from_checkpoint: null  # null | true | checkpoint 路径
+  # 跨阶段冷启动（只加载权重，步数从 0 开始）；与 resume 互斥，resume 优先
+  # 可用阶段别名 sft|dpo|grpo|ppo，或显式目录路径
+  init_from_checkpoint: null    # null | sft | dpo | grpo | ppo | 路径
   distributed: auto              # auto：有 WORLD_SIZE 则分布式；none：强制单进程
   ddp_find_unused_parameters: false
   gradient_accumulation_steps: null

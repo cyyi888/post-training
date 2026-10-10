@@ -1,12 +1,22 @@
-"""DPO / IPO 损失与动态 β 单元测试（纯 CPU）。"""
+"""【设备：CPU】DPO / IPO 损失与动态 β 公式单测。
+
+原因：只验证偏好损失、合页与动态 β 的数值行为，小张量即可，不加载基座、无需 CUDA。
+端到端 TRL 短训见 ``tests/test_dpo_pipeline.py``（GPU）。
+"""
 
 from __future__ import annotations
 
 import torch
 
-from src.algorithms.dpo_loss import DPOLoss, DPOLossConfig, compute_dpo_loss
-from src.algorithms.dpo_losses import dpo_loss, ipo_loss
-from src.algorithms.dpo_variants import compute_ipo_loss, compute_variant_loss
+from src.algorithms.dpo_losses import (
+    DPOLoss,
+    DPOLossConfig,
+    compute_dpo_loss,
+    compute_ipo_loss,
+    compute_variant_loss,
+    dpo_loss,
+    ipo_loss,
+)
 from src.algorithms.dynamic_beta import DynamicBetaController
 
 
@@ -126,6 +136,20 @@ def test_variant_dispatch_and_module():
     loss_d, metrics = module(pc, pr, rc, rr)
     assert torch.isfinite(loss_d)
     assert "mean_kl" in metrics
+
+
+def test_compat_shims_reexport():
+    """旧模块路径仍可导入，且对象与统一模块同一实现。"""
+    # 注意：``from src.algorithms import dpo_loss`` 会命中包级函数导出，
+    # 兼容 shim 子模块需用 ``import src.algorithms.dpo_loss``。
+    import src.algorithms.dpo_loss as legacy_cfg
+    import src.algorithms.dpo_losses as unified
+    import src.algorithms.dpo_variants as legacy_var
+
+    assert legacy_cfg.DPOLossConfig is unified.DPOLossConfig
+    assert legacy_cfg.compute_dpo_loss is unified.compute_dpo_loss
+    assert legacy_var.compute_ipo_loss is unified.compute_ipo_loss
+    assert legacy_var.compute_variant_loss is unified.compute_variant_loss
 
 
 def test_loss_config_beta_mode_compat():

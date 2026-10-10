@@ -1,3 +1,4 @@
+# PPO：TRL 基线 + 自研 RewardEngine 在线循环（对照自研 GRPO）
 algorithm: ppo
 output_subdir: checkpoints/ppo
 learning_rate: 1.0e-6
@@ -7,11 +8,24 @@ gradient_accumulation_steps: 4
 max_completion_length: 128
 logging_steps: 5
 save_strategy: no
-# 仅 TRL PPO 基线超参
+max_steps: null
+# online_loop=true：generate → RewardEngine → PPOTrainer.step（推荐，保证 gt/测例可用）
 ppo:
   mini_batch_size: 1
   kl_coef: 0.05
+  online_loop: true
+# 与 GRPO 共用可插拔奖励；代码题可改为 funcs=[code, format, length]
 reward:
   funcs:
     - accuracy
-  weights: [1.0]
+    - format
+    - length
+    - steps
+  weights: [1.0, 0.2, 0.1, 0.3]
+  length_reward:
+    min_tokens: 8
+    max_tokens: 256
+    target_min: 16
+    target_max: 128
+  code_reward:
+    timeout: 3.0

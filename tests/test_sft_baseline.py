@@ -1,4 +1,8 @@
-"""SFT 自研采样器与梯度裁剪单测（不依赖 GPU / TRL）。"""
+"""【设备：CPU】SFT 自研采样器与梯度裁剪单测。
+
+原因：只测长度分组 / 分桶采样与 grad_clip 策略逻辑，不加载模型、不跑 TRL 训练，无需 CUDA。
+完整 SFT 训练请用 ``scripts/train.py training=sft``（建议 GPU）。
+"""
 
 from __future__ import annotations
 

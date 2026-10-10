@@ -1,4 +1,7 @@
-"""数据流水线单元测试（不依赖 GPU / 外网）。"""
+"""【设备：CPU】数据适配器 / 清洗 / 划分 / 投影单元测试。
+
+原因：纯数据处理与 schema 校验，不加载模型，无需 CUDA、无外网。
+"""
 
 from __future__ import annotations
 
@@ -100,7 +103,17 @@ def test_projectors():
 
     sft_s = [Sample(prompt="q", chosen="a", system="sys")]
     dpo_s = [Sample(prompt="q", chosen="good", rejected="bad")]
-    grpo_s = [Sample(prompt="q", metadata={"ground_truth": "1"})]
+    grpo_s = [
+        Sample(
+            prompt="def f():\n",
+            metadata={
+                "ground_truth": "pass",
+                "entry_point": "f",
+                "test": "def check(c): assert True",
+                "source_format": "humaneval",
+            },
+        )
+    ]
 
     sft = project_sft(sft_s)
     assert "messages" in sft[0]
@@ -110,4 +123,7 @@ def test_projectors():
     assert dpo[0]["chosen"][0]["content"] == "good"
 
     grpo = project_grpo(grpo_s)
-    assert grpo[0]["ground_truth"] == "1"
+    assert grpo[0]["ground_truth"] == "pass"
+    assert grpo[0]["entry_point"] == "f"
+    assert grpo[0]["test"]
+    assert grpo[0]["task_prompt"] == "def f():\n"

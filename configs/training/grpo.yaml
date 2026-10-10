@@ -5,7 +5,7 @@ num_train_epochs: 1
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 4
 num_generations: 4
-max_completion_length: 256
+max_completion_length: 512
 temperature: 0.9
 # 自研 GRPO：clip 与参考模型 KL
 clip_range: 0.2
@@ -15,8 +15,36 @@ max_steps: null
 logging_steps: 5
 save_strategy: no
 gradient_checkpointing: false
+# GSM8K 默认：正确性 + 格式 + 长度 + 逐步过程分
+# HumanEval 可改为: funcs=[code, format, length] weights=[1.0, 0.1, 0.05]
 reward:
   funcs:
     - accuracy
     - format
-  weights: [1.0, 0.2]
+    - length
+    - steps
+  weights: [1.0, 0.2, 0.1, 0.3]
+  code_reward:
+    timeout: 3.0
+# 完整 6 步 Rollout
+rollout:
+  bucket: true
+  bucket_boundaries: [128, 256, 512]
+  # 短档大 batch、长档小 batch；null 则按 per_device_train_batch_size 自动推算
+  bucket_batch_sizes: null
+  top_p: 0.95
+  top_k: 0
+  max_resample: 2
+  max_group_resample: 2
+  min_valid_per_group: 2
+  require_answer_format: true
+  filter_extreme_length: true
+  clear_cache: true
+  # 训练默认 false；消融公平对比时设 true 并固定 generation_seed
+  fix_generation_seed: false
+  generation_seed: 0
+  length_reward:
+    min_tokens: 16
+    max_tokens: 512
+    target_min: 32
+    target_max: 384
