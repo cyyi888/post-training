@@ -16,6 +16,8 @@ __all__ = [
     "finish_wandb",
     "log_metrics",
     "resolve_report_to",
+    "resolve_hf_report_to",
+    "MetricSink",
 ]
 
 
@@ -35,13 +37,24 @@ def __getattr__(name: str):
         from .runtime import prepare_runtime, teardown_runtime
 
         return {"prepare_runtime": prepare_runtime, "teardown_runtime": teardown_runtime}[name]
-    if name in ("init_wandb", "finish_wandb", "log_metrics", "resolve_report_to"):
-        from .wandb_utils import finish_wandb, init_wandb, log_metrics, resolve_report_to
+    if name in ("init_wandb", "finish_wandb", "log_metrics", "resolve_report_to", "resolve_hf_report_to"):
+        from .wandb_utils import (
+            finish_wandb,
+            init_wandb,
+            log_metrics,
+            resolve_hf_report_to,
+            resolve_report_to,
+        )
 
         return {
             "init_wandb": init_wandb,
             "finish_wandb": finish_wandb,
             "log_metrics": log_metrics,
             "resolve_report_to": resolve_report_to,
+            "resolve_hf_report_to": resolve_hf_report_to,
         }[name]
+    if name == "MetricSink":
+        from .metric_sink import MetricSink
+
+        return MetricSink
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

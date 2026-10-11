@@ -80,6 +80,7 @@ class BaseTrainer(ABC):
         self.is_main_process = True
         self._dist_owned = False
         self._tracking = False
+        self.metric_sink = None
 
     def train(self, config: Any, dataset: Any) -> TrainResult:
         """模板方法：工程准备 → 算法 → 记录与收尾。"""
@@ -99,7 +100,10 @@ class BaseTrainer(ABC):
             )
             result = self.run_algorithm(ctx)
             if self.is_main_process:
-                self.track_metrics({f"final/{k}": v for k, v in result.metrics.items()})
+                self.track_metrics(
+                    {f"final/{k}": v for k, v in result.metrics.items()},
+                    step_kind="final",
+                )
                 self.logger.info(
                     "训练结束 checkpoint=%s metrics=%s",
                     result.checkpoint_dir,
@@ -134,8 +138,10 @@ class BaseTrainer(ABC):
             self.logger.warning("未能固定随机种子: %s", exc)
 
         self._tracking = False
+        self.metric_sink = None
         if self.is_main_process:
             try:
+                from src.utils.metric_sink import MetricSink
                 from src.utils.wandb_utils import init_wandb, resolve_report_to
 
                 try:
@@ -144,15 +150,33 @@ class BaseTrainer(ABC):
                     OmegaConf.set_struct(config, False)
                 except Exception:
                     pass
+                # 仅用于标记是否启用追踪；HF Trainer 的 report_to 另见 resolve_hf_report_to
                 if hasattr(config, "report_to"):
                     config.report_to = resolve_report_to(config)
                 init_wandb(config)
-                self._tracking = True
+                self._tracking = bool(
+                    config.get("wandb")
+                    and config.wandb.get("enabled")
+                    and str(config.wandb.get("mode", "disabled")) != "disabled"
+                )
+                self.metric_sink = MetricSink(
+                    enabled=self._tracking,
+                    is_main_process=True,
+                    algorithm=str(self.name),
+                )
                 self._log_bound_data_version(config)
             except Exception as exc:
                 self.logger.warning("实验追踪未启用: %s", exc)
+                self.metric_sink = MetricSink(
+                    enabled=False, is_main_process=True, algorithm=str(self.name)
+                )
         else:
             os.environ.setdefault("WANDB_DISABLED", "true")
+            from src.utils.metric_sink import MetricSink
+
+            self.metric_sink = MetricSink(
+                enabled=False, is_main_process=False, algorithm=str(self.name)
+            )
 
         self.logger.info(
             "工程就绪 | algo=%s distributed=%s world=%s",
@@ -179,19 +203,42 @@ class BaseTrainer(ABC):
                 self.logger.warning("关闭进程组失败: %s", exc)
             self._dist_owned = False
 
-    def track_metrics(self, metrics: dict[str, Any], step: int | None = None) -> None:
-        """主进程把标量写到日志和 W&B。"""
-        if not self.is_main_process or not metrics:
-            return
-        self.logger.info("metrics %s", metrics)
-        if not self._tracking:
-            return
-        try:
-            from src.utils.wandb_utils import log_metrics
+    def track_metrics(
+        self,
+        metrics: dict[str, Any],
+        step: int | None = None,
+        step_kind: str | None = None,
+    ) -> None:
+        """结构化指标统一走 MetricSink（主进程）；不替代 logger 程序事件。"""
+        sink = getattr(self, "metric_sink", None)
+        if sink is None:
+            if not self.is_main_process or not metrics:
+                return
+            if self._tracking:
+                try:
+                    from src.utils.wandb_utils import log_metrics
 
-            log_metrics(metrics, step=step)
-        except Exception as exc:
-            self.logger.warning("上报指标失败: %s", exc)
+                    log_metrics(metrics, step=step)
+                except Exception as exc:
+                    self.logger.warning("上报指标失败: %s", exc)
+            return
+        sink.log(metrics, step=step, step_kind=step_kind)
+
+    def make_hf_metrics_callback(self):
+        """SFT/DPO 等 HF Trainer 用的 MetricSink Callback。"""
+        from src.utils.metric_sink import make_metric_sink_callback
+
+        sink = getattr(self, "metric_sink", None)
+        if sink is None:
+            from src.utils.metric_sink import MetricSink
+
+            sink = MetricSink(
+                enabled=self._tracking,
+                is_main_process=self.is_main_process,
+                algorithm=str(self.name),
+            )
+            self.metric_sink = sink
+        return make_metric_sink_callback(sink, algorithm=str(self.name))
 
     def detect_distributed(self, config: Any) -> None:
         """读取 torchrun / accelerate 注入的环境变量。``distributed: none`` 时强制单进程。"""
@@ -235,11 +282,12 @@ class BaseTrainer(ABC):
 
     def hf_training_kwargs(self, config: Any) -> dict[str, Any]:
         """传给 TRL / HF TrainingArguments 的通用字段（含优化与精度）。"""
-        from src.utils.wandb_utils import default_run_name, resolve_report_to
+        from src.utils.wandb_utils import default_run_name, resolve_hf_report_to
 
         runtime = getattr(self, "runtime", None) or self.resolve_runtime(config)
         kwargs: dict[str, Any] = {
-            "report_to": resolve_report_to(config),
+            # 禁止 HF 直连 W&B，统一经 MetricSinkCallback / track_metrics
+            "report_to": resolve_hf_report_to(config),
             "run_name": default_run_name(config),
             "logging_dir": f"{config.output_dir}/logs/{config.training.algorithm}",
             "learning_rate": runtime.learning_rate,

@@ -1,0 +1,13 @@
+task: gsm8k
+checkpoint: null
+metrics:
+  - accuracy
+  - format_rate
+batch_size: 1
+max_new_tokens: 512
+num_samples: 1
+k: 1
+temperature: 0.0
+top_p: 1.0
+save_report: true
+report_name: gsm8k_eval_report.json

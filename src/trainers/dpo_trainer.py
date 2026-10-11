@@ -2,8 +2,8 @@
 
 WandB：
 - ``BaseTrainer.prepare_engineering`` 调用 ``init_wandb``；
-- ``ctx.hf_args['report_to']`` 传给 ``DPOConfig``，由 TRL/HF 打点；
-- ``CustomDPOTrainer`` 额外 ``log``：``train/loss``、``train/mean_kl``、``train/beta``、
+- HF ``report_to`` 固定 ``none``，经 MetricSink / ``metrics_fn`` 上报，避免重复；
+- ``CustomDPOTrainer`` 上报：``train/loss``、``train/mean_kl``、``train/beta``、
   ``val/loss``、``val/mean_kl``。
 """
 
@@ -123,12 +123,14 @@ def build_custom_dpo_trainer_cls():
             beta_mode: str = "fixed",
             margin: float = 1.0,
             beta_controller: DynamicBetaController | None = None,
+            metrics_fn: Any | None = None,
             **kwargs: Any,
         ):
             self.custom_loss_type = str(custom_loss_type).lower()
             self.beta_mode = str(beta_mode).lower()
             self.margin = float(margin)
             self.beta_controller = beta_controller
+            self.metrics_fn = metrics_fn
             self._last_train_kl = 0.0
             self._last_eval_kl = 0.0
             self._last_eval_loss = 0.0
@@ -139,6 +141,19 @@ def build_custom_dpo_trainer_cls():
                 if hasattr(self, "args") and hasattr(self.args, "beta"):
                     self.args.beta = self.beta
             self._freeze_reference_model()
+
+        def _emit_metrics(self, payload: dict[str, Any], *, step: int | None = None) -> None:
+            """结构化指标走 MetricSink；不经 HF WandbCallback。"""
+            fn = self.metrics_fn
+            if fn is None:
+                return
+            try:
+                fn(payload, step=step, step_kind="optimizer_step")
+            except TypeError:
+                try:
+                    fn(payload, step=step)
+                except TypeError:
+                    fn(payload)
 
         def _freeze_reference_model(self) -> None:
             ref = getattr(self, "ref_model", None)
@@ -222,21 +237,21 @@ def build_custom_dpo_trainer_cls():
             if hasattr(self, "store_metrics"):
                 self.store_metrics(metrics, train_eval="train")
 
-            # 逐步上报（梯度同步步），便于 WandB 同图观察 loss / KL / beta
+            # 逐步上报（梯度同步步）→ MetricSink
             should_log = True
             accel = getattr(self, "accelerator", None)
             if accel is not None and hasattr(accel, "sync_gradients"):
                 should_log = bool(accel.sync_gradients)
             if should_log:
-                log_payload = {
-                    "train/loss": float(loss.detach().item()),
-                    "train/mean_kl": float(metrics.get("mean_kl", self._last_train_kl)),
-                    "train/beta": float(self.beta),
-                }
-                try:
-                    self.log(log_payload)
-                except Exception:
-                    pass
+                step = int(getattr(getattr(self, "state", None), "global_step", 0) or 0)
+                self._emit_metrics(
+                    {
+                        "train/loss": float(loss.detach().item()),
+                        "train/mean_kl": float(metrics.get("mean_kl", self._last_train_kl)),
+                        "train/beta": float(self.beta),
+                    },
+                    step=step,
+                )
 
             if return_outputs:
                 return loss, metrics
@@ -249,10 +264,11 @@ def build_custom_dpo_trainer_cls():
             if eval_kl is None:
                 eval_kl = self._last_eval_kl
             eval_loss = self._last_eval_loss
-            try:
-                self.log({"val/loss": float(eval_loss), "val/mean_kl": float(eval_kl)})
-            except Exception:
-                pass
+            step = int(getattr(getattr(self, "state", None), "global_step", 0) or 0)
+            self._emit_metrics(
+                {"val/loss": float(eval_loss), "val/mean_kl": float(eval_kl)},
+                step=step,
+            )
 
             if self.beta_controller is not None and self.beta_mode == "dynamic":
                 new_beta = self.beta_controller.step(float(eval_kl))
@@ -265,10 +281,10 @@ def build_custom_dpo_trainer_cls():
                     self.beta_controller.target_kl,
                     self.beta,
                 )
-                try:
-                    self.log({"train/beta": float(self.beta), "val/mean_kl": float(eval_kl)})
-                except Exception:
-                    pass
+                self._emit_metrics(
+                    {"train/beta": float(self.beta), "val/mean_kl": float(eval_kl)},
+                    step=step,
+                )
             return output
 
         def _aggregate_stored_eval_kl(self) -> float | None:
@@ -395,10 +411,12 @@ class DPOStageTrainer(BaseTrainer):
             "eval_dataset": eval_ds,
             "processing_class": ctx.tokenizer,
             "tokenizer": ctx.tokenizer,
+            "callbacks": [self.make_hf_metrics_callback()],
             "custom_loss_type": loss_cfg.loss_type,
             "beta_mode": loss_cfg.resolved_beta_mode(),
             "margin": loss_cfg.margin,
             "beta_controller": beta_controller,
+            "metrics_fn": self.track_metrics,
         }
         trainer_init = _filter_kwargs(CustomDPOTrainerCls.__init__, trainer_init)
         # 自定义 kw 可能被 filter 掉（父类签名无 **kwargs 时不会），强制写回
@@ -406,6 +424,10 @@ class DPOStageTrainer(BaseTrainer):
         trainer_init["beta_mode"] = loss_cfg.resolved_beta_mode()
         trainer_init["margin"] = loss_cfg.margin
         trainer_init["beta_controller"] = beta_controller
+        trainer_init["metrics_fn"] = self.track_metrics
+        if "callbacks" not in trainer_init:
+            # 父类 __init__ 若接受 callbacks，上面 filter 会留下；否则挂到 args 侧无效时再尝试
+            pass
 
         report_to = dpo_kwargs.get("report_to", getattr(args, "report_to", "none"))
         logger.info(

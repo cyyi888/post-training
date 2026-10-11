@@ -128,6 +128,7 @@ class SFTStageTrainer(BaseTrainer):
                 if grad_clip_cfg.get("max_norm") not in (None, "null")
                 else runtime.max_grad_norm
             ),
+            callbacks=[self.make_hf_metrics_callback()],
         )
         train_out = trainer.train(resume_from_checkpoint=ctx.resume_from)
         metrics = dict(train_out.metrics) if train_out and train_out.metrics else {}

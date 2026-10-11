@@ -182,10 +182,19 @@ class PPOStageTrainer(BaseTrainer):
                 "PPO 基线：在线 RL 循环（generate → RewardEngine → step）online_loop=%s",
                 online_loop,
             )
-            metrics = _online_rl_loop(trainer, tokenizer, train_ds, reward_fn, tcfg)
+            metrics = _online_rl_loop(
+                trainer, tokenizer, train_ds, reward_fn, tcfg, metrics_fn=self.track_metrics
+            )
             metrics["ppo/online_loop"] = 1.0
         else:
             logger.info("PPO 基线：调用 TRL PPOTrainer.train()")
+            # TRL train 路径：关掉直连 W&B，用 Callback 进 MetricSink
+            try:
+                cb = self.make_hf_metrics_callback()
+                if hasattr(trainer, "add_callback"):
+                    trainer.add_callback(cb)
+            except Exception as exc:
+                logger.warning("PPO MetricSink callback 未挂上: %s", exc)
             try:
                 train_out = trainer.train(resume_from_checkpoint=ctx.resume_from)
             except TypeError:
@@ -210,6 +219,7 @@ def _online_rl_loop(
     train_ds: Any,
     reward_fn: Any,
     tcfg: Any,
+    metrics_fn: Any | None = None,
 ) -> dict[str, float]:
     """在线 RL：逐条 generate → 自研奖励（含 gt/测例）→ ``trainer.step``。"""
     import torch
@@ -225,6 +235,18 @@ def _online_rl_loop(
     last_stats: dict[str, float] = {}
     model = getattr(trainer, "model", None)
     device = next(model.parameters()).device if model is not None else torch.device("cpu")
+    logging_steps = int(tcfg.get("logging_steps", 5) or 5)
+
+    def _emit(payload: dict[str, float], *, step: int, step_kind: str) -> None:
+        if metrics_fn is None or not payload:
+            return
+        try:
+            metrics_fn(payload, step=step, step_kind=step_kind)
+        except TypeError:
+            try:
+                metrics_fn(payload, step=step)
+            except TypeError:
+                metrics_fn(payload)
 
     for i in range(len(train_ds)):
         if max_steps_i is not None and n >= max_steps_i:
@@ -253,6 +275,8 @@ def _online_rl_loop(
             tests=[row.get("test")],
             entry_points=[row.get("entry_point")],
         )[0]
+        _emit({"ppo/reward": float(score)}, step=n + 1, step_kind="rollout_step")
+
         reward = torch.tensor([float(score)], device=device)
         q = query_ids[0].detach().cpu()
         r = response_ids[0].detach().cpu()
@@ -263,7 +287,26 @@ def _online_rl_loop(
             }
         reward_acc += float(score)
         n += 1
+        mean_r = reward_acc / max(n, 1)
+        update_payload: dict[str, float] = {
+            "ppo/reward_mean_ema": mean_r,
+            "train/steps": float(n),
+            **last_stats,
+        }
+        if isinstance(stats, dict) and isinstance(stats.get("loss"), (int, float)):
+            update_payload["train/loss"] = float(stats["loss"])
+        if logging_steps and n % logging_steps == 0:
+            _emit(update_payload, step=n, step_kind="optimizer_step")
 
     last_stats["reward/mean"] = reward_acc / max(n, 1)
     last_stats["train/steps"] = float(n)
+    if n:
+        _emit(
+            {
+                "ppo/reward_mean_ema": last_stats["reward/mean"],
+                "train/steps": float(n),
+            },
+            step=n,
+            step_kind="optimizer_step",
+        )
     return last_stats

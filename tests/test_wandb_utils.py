@@ -5,7 +5,7 @@
 
 from omegaconf import OmegaConf
 
-from src.utils.wandb_utils import default_run_name, resolve_report_to
+from src.utils.wandb_utils import default_run_name, resolve_hf_report_to, resolve_report_to
 
 
 def test_report_to_disabled():
@@ -18,6 +18,7 @@ def test_report_to_disabled():
         }
     )
     assert resolve_report_to(cfg) == "none"
+    assert resolve_hf_report_to(cfg) == "none"
 
 
 def test_report_to_wandb_online():
@@ -30,6 +31,8 @@ def test_report_to_wandb_online():
         }
     )
     assert resolve_report_to(cfg) == "wandb"
+    # HF 侧禁止直连，统一走 MetricSink
+    assert resolve_hf_report_to(cfg) == "none"
 
 
 def test_default_run_name():

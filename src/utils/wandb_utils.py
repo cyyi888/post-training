@@ -30,9 +30,10 @@ def default_run_name(cfg: Any) -> str:
 
 def resolve_report_to(cfg: Any) -> str:
     """
-    把 wandb 配置映射成 HuggingFace / TRL 的 ``report_to``。
+    是否启用实验追踪（供 init_wandb / 文档）。
 
-    wandb 开启且 mode 不是 disabled 时返回 ``"wandb"``，否则用配置里的 report_to。
+    注意：HF/TRL Trainer 的 ``report_to`` 应使用 :func:`resolve_hf_report_to`，
+    固定为 ``none``，避免与 MetricSink 重复上报 W&B。
     """
     w = cfg.get("wandb", {})
     if w is not None and w.get("enabled") and str(w.get("mode", "online")) != "disabled":
@@ -43,6 +44,12 @@ def resolve_report_to(cfg: Any) -> str:
     if isinstance(report, (list, tuple)):
         return report[0] if report else "none"
     return str(report)
+
+
+def resolve_hf_report_to(cfg: Any = None) -> str:
+    """HF/TRL ``TrainingArguments.report_to``：始终 ``none``（指标只走 MetricSink）。"""
+    del cfg  # 保留参数便于调用方统一签名
+    return "none"
 
 
 def init_wandb(cfg: DictConfig | Any):

@@ -157,9 +157,12 @@ class GRPOEngine:
                                 "train/clipfrac": metrics.get("policy/clipfrac", 0.0),
                             }
                             try:
-                                self.log_fn(train_logs, step=step)
+                                self.log_fn(train_logs, step=step, step_kind="optimizer_step")
                             except TypeError:
-                                self.log_fn(train_logs)
+                                try:
+                                    self.log_fn(train_logs, step=step)
+                                except TypeError:
+                                    self.log_fn(train_logs)
                     if max_steps is not None and step >= int(max_steps):
                         last_metrics["train/steps"] = float(step)
                         last_metrics["reward/mean_all"] = reward_sum / max(reward_n, 1)

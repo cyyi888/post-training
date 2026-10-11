@@ -162,6 +162,24 @@ def score_math_steps(text: str, ground_truth: Any | None = None) -> float:
     return float(min(1.0, structure + calc + finale))
 
 
+def run_humaneval_tests(
+    prompt: str,
+    completion: str,
+    test: str,
+    entry_point: str,
+    *,
+    timeout: float = 3.0,
+) -> tuple[bool, str]:
+    """
+    在子进程中执行 HumanEval 风格：prompt+completion+test，再调用 check(entry_point)。
+
+    返回 (通过?, 原因)。
+    """
+    return _run_humaneval_once(
+        prompt, completion, test, entry_point, timeout=timeout
+    )
+
+
 def _run_humaneval_once(
     prompt: str,
     completion: str,

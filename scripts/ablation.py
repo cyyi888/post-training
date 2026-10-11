@@ -1,5 +1,12 @@
 #!/usr/bin/env python
-"""消融实验入口（基于 Hydra）。"""
+"""消融实验入口（Hydra）：ExperimentPlanner + ExperimentRunner + ResultAggregator。
+
+常用：
+  python scripts/ablation.py                              # 默认 dry_run
+  python scripts/ablation.py experiment.dry_run=false     # GPU 真实训练
+  python scripts/ablation.py experiment.report_only=true  # 只根据已有 runs 重生成报告
+  python scripts/ablation.py experiment.eval_only=true    # 仅重试评测（保留 checkpoint）
+"""
 
 from __future__ import annotations
 
@@ -14,62 +21,63 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.experiment.scheduler import AblationScheduler
+from src.experiment import ExperimentPlanner, ExperimentRunner
+from src.experiment.aggregator import ResultAggregator
 from src.utils.runtime import prepare_runtime, teardown_runtime
-from src.utils.wandb_utils import finish_wandb, init_wandb, log_metrics
 
 logger = logging.getLogger("posttrainlab.ablation")
 
 
-def _dry_run(cfg, variant_name: str) -> dict:
-    """占位训练钩子：只记录关键配置字段，不实际占用 GPU。"""
-    t = cfg.get("training", {})
-    beta_mode = t.get("beta_mode")
-    if beta_mode is None:
-        dyn = t.get("dynamic_beta", False)
-        beta_mode = "dynamic" if dyn is True else ("fixed" if dyn is False else "dynamic")
-    fixed_beta = t.get("fixed_beta", t.get("beta", 0.0))
-    metrics = {
-        "loss_type": str(t.get("loss_type", "")),
-        "beta": float(fixed_beta or 0.0),
-        "beta_mode": str(beta_mode),
-        "dynamic_beta": str(beta_mode) == "dynamic",
-        "penalty_enabled": bool(t.get("penalty", {}).get("enabled", False))
-        if t.get("penalty")
-        else False,
-        "status": "dry_run",
-    }
-    log_metrics({f"ablation/{variant_name}/{k}": v for k, v in metrics.items() if isinstance(v, (int, float, bool))})
-    return metrics
-
-
 @hydra.main(version_base=None, config_path="../configs", config_name="experiment/ablation")
 def main(cfg: DictConfig) -> None:
-    track = bool(cfg.experiment.get("track_wandb", False))
-    if track:
-        OmegaConf.set_struct(cfg, False)
-        cfg.wandb.enabled = True
-        if str(cfg.wandb.get("mode", "disabled")) == "disabled":
-            cfg.wandb.mode = "online"
-
-    prepare_runtime(cfg, init_wb=track)
+    OmegaConf.set_struct(cfg, False)
+    prepare_runtime(cfg, init_wb=bool(cfg.experiment.get("track_wandb", False)))
     try:
-        logger.info("Ablation: %s", cfg.experiment.name)
-        scheduler = AblationScheduler(cfg)
+        report_only = bool(cfg.experiment.get("report_only", False))
+        dry = bool(cfg.experiment.get("dry_run", True))
+        logger.info(
+            "Ablation: %s dry_run=%s report_only=%s eval_only=%s seeds=%s",
+            cfg.experiment.name,
+            dry,
+            report_only,
+            bool(cfg.experiment.get("eval_only", False)),
+            list(cfg.experiment.get("seeds") or []),
+        )
+        planner = ExperimentPlanner(cfg)
+        runs = planner.plan()
+        planner.write_snapshots(runs)
+        logger.info("Planned %s runs → %s", len(runs), planner.root / "plan.json")
 
-        def train_fn(vcfg, name: str):
-            # 开启追踪时，为每个变体创建独立的嵌套 W&B run
-            if track:
-                finish_wandb()
-                OmegaConf.set_struct(vcfg, False)
-                vcfg.wandb.enabled = True
-                vcfg.wandb.mode = cfg.wandb.mode
-                vcfg.run_name = f"{cfg.experiment.name}-{name}"
-                init_wandb(vcfg)
-            return _dry_run(vcfg, name)
+        if not report_only:
+            runner = ExperimentRunner(cfg)
+            records = runner.run_all(runs)
+            n_dry = sum(1 for r in records if r.status == "dry_run")
+            n_ok = sum(1 for r in records if r.status in ("succeeded", "skipped"))
+            n_fail = sum(1 for r in records if r.status in ("failed", "eval_failed"))
+            logger.info(
+                "Ablation finished total=%s dry_run=%s ok/skip=%s fail=%s",
+                len(records),
+                n_dry,
+                n_ok,
+                n_fail,
+            )
+        else:
+            logger.info("report_only：跳过训练/评测，仅聚合 %s", planner.root)
 
-        results = scheduler.run(train_fn)
-        logger.info("Ablation results: %s", results)
+        if bool(cfg.experiment.get("aggregate", True)):
+            try:
+                baseline = cfg.experiment.get("baseline_variant")
+                agg = ResultAggregator(
+                    planner.root,
+                    baseline_variant=str(baseline) if baseline not in (None, "", "null") else None,
+                    require_plots=bool(cfg.experiment.get("require_plots", True)),
+                )
+                paths = agg.write_all()
+                logger.info("Reports: %s", paths)
+            except Exception as exc:
+                # 报告失败不得抹掉已有训练/评测产物
+                logger.exception("报告生成失败（训练/评测产物保留）: %s", exc)
+                raise
     finally:
         teardown_runtime()
 

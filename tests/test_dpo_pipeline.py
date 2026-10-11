@@ -202,16 +202,19 @@ def test_dpo_pipeline_ipo_on_gpu():
 
 
 def test_dpo_pipeline_wandb_report_to_wiring():
-    """开启 wandb 时 report_to 应为 wandb，供 DPOConfig / TRL 上报。"""
+    """追踪启用时 resolve_report_to=wandb；HF Trainer 侧必须 none 防重复。"""
+    from src.utils.wandb_utils import resolve_hf_report_to
+
     cfg_on = OmegaConf.create(
         {
             "report_to": "none",
             "wandb": {"enabled": True, "mode": "online", "project": "posttrainlab"},
             "training": {"algorithm": "dpo"},
-            "model": {"name": "toy/model"},
+            "model": {"name": "Qwen/Qwen2.5-0.5B-Instruct"},
         }
     )
     assert resolve_report_to(cfg_on) == "wandb"
+    assert resolve_hf_report_to(cfg_on) == "none"
 
     cfg_off = OmegaConf.create(
         {
@@ -220,6 +223,7 @@ def test_dpo_pipeline_wandb_report_to_wiring():
         }
     )
     assert resolve_report_to(cfg_off) == "none"
+    assert resolve_hf_report_to(cfg_off) == "none"
 
 
 def test_dpo_pipeline_strategy_registered_and_no_engine():

@@ -10,6 +10,26 @@
 - **禁止**为省事引入 GPT-2、tiny-*、其它随机小模型或第三方基座作为替代。
 - 改代码、补测试、写脚本、改文档时都要遵守；需要更小算力时用 `max_steps` / 截断长度 / LoRA，而不是换模型。
 
+## 指标上报（MetricSink）
+
+训练过程中的**结构化数值指标**统一经 `MetricSink`（`src/utils/metric_sink.py`）进入实验管理（当前后端为 W&B，复用 `wandb_utils`）。
+
+| 算法 | 接入方式 |
+|------|----------|
+| SFT | HF `TrainerCallback.on_log` → MetricSink |
+| DPO | 自研指标计算后 `metrics_fn` / Callback → MetricSink |
+| GRPO | 现有 `log_fn=self.track_metrics` → MetricSink |
+| PPO | 在线循环 rollout / update 关键点 → MetricSink |
+
+要点：
+
+- HF/TRL 的 `report_to` **固定为 `none`**，避免与 MetricSink 重复写 W&B。
+- 采用「公共指标 + 算法专属指标」；不强制每算法都报 loss/KL/reward。
+- `train/mean_kl`（DPO）与 `train/kl`（GRPO）定义不同，**禁止合并曲线**。
+- `meta/step_kind` 标明 `optimizer_step` / `rollout_step` / `epoch` / `final`。
+- 指标字典见 `src/utils/metric_catalog.py`；跨算法对比请优先看独立评测结果。
+- `logger.info` 仍用于启动/加载/异常/存盘等程序事件。
+
 ## 架构
 
 ```
@@ -206,12 +226,67 @@ python scripts/train.py training=grpo data=gsm8k \
 ```bash
 # CPU 轻量（日常）
 pytest tests/test_dpo_losses.py tests/test_grpo_loss.py tests/test_rewards.py \
-  tests/test_rollout.py tests/test_data_pipeline.py tests/test_pipeline_offline.py \
-  tests/test_pipeline_chain.py tests/test_sft_baseline.py tests/test_trainers_strategy.py \
-  tests/test_versioning.py tests/test_wandb_utils.py -q
+  tests/test_evaluators.py tests/test_rollout.py tests/test_data_pipeline.py \
+  tests/test_pipeline_offline.py tests/test_pipeline_chain.py tests/test_sft_baseline.py \
+  tests/test_trainers_strategy.py tests/test_versioning.py tests/test_wandb_utils.py -q
 
 # GPU 流水线冒烟
 pytest tests/test_dpo_pipeline.py tests/test_grpo_pipeline.py tests/test_ppo_pipeline.py -v
+```
+
+#### 工程能力测试矩阵
+
+状态含义（与「已接线」区分；当前无 GPU 服务器，故多数训练项仍非「通过」）：
+
+| 标记 | 含义 |
+|------|------|
+| **通过** | GPU 端到端实测通过 |
+| **CPU测** | 本机 CPU 单测/Mock 已覆盖接线与逻辑；真实训练/多卡仍 **GPU_PENDING** |
+| **待验证** | 生产路径已接线，缺专项实测 |
+| **部分** | 实现不完整（勿当全功能通过） |
+| **未接线** | 无生产代码路径 |
+
+| 能力 | SFT | DPO | GRPO | PPO |
+|------|-----|-----|------|-----|
+| BF16/FP16 | CPU测 | CPU测 | CPU测 | CPU测 |
+| 梯度累积 | CPU测 | CPU测 | CPU测 | CPU测 |
+| 梯度检查点 | CPU测 | CPU测 | CPU测 | CPU测 |
+| LoRA | CPU测 | CPU测 | CPU测 | CPU测 |
+| DDP | 待验证 | 待验证 | 待验证 | 待验证 |
+| 完整断点恢复 | 待验证 | 待验证 | 部分(仅权重) | 部分(online仅权重) |
+| 过程指标上报 | CPU测 | CPU测 | CPU测 | CPU测 |
+| 显存监控 | 未接线 | 未接线 | 待验证 | 未接线 |
+
+接线与完成度备注（改实现或 GPU 实测后同步改矩阵）：
+
+- **BF16/FP16 / 梯度累积 / 梯度检查点**：`BaseTrainer.resolve_runtime` → SFT/DPO/PPO 进 HF/TRL args；GRPO 进 `GRPOEngine`（autocast + accum）；`apply_gradient_checkpointing` 统一开启。CPU：`test_trainers_strategy` 已断言配置合并与 `hf_training_kwargs`；**AMP/累积真实数值行为仍 GPU_PENDING**。
+- **LoRA**：PEFT LoRA 训练与评测加载路径已实现；Checkpoint Full/LoRA 分支有 CPU Mock（`test_checkpoint_eval`）。本项目不做量化 LoRA；真实 GPU 训/评仍 **GPU_PENDING**。
+- **DDP**：HF 靠 `local_rank`；GRPO 用 `prepare_native_model` 包 DDP。缺 `torchrun` 实测 → 待验证。
+- **完整断点恢复**：路径解析/init_from CPU 有测；SFT/DPO 生产走 `Trainer.train(resume_from_checkpoint=…)`（DPO 另存动态 β），**完整 optimizer/step 续训未 GPU 实测**；GRPO / PPO(online) **仅恢复 adapter 权重**。
+- **过程指标上报**：统一 `MetricSink` + `track_metrics`（HF `report_to` 禁直连防重复）；CPU：`test_metric_sink` / `test_wandb_utils` 已过。**真实 W&B online 曲线仍 GPU_PENDING**。
+- **显存监控**：仅 GRPO Rollout 上报 `perf/peak_mem_gb`（待 GPU 勾选）；SFT/DPO/PPO **未接线**。
+
+建议验证命令（通过后把对应格改为「通过」）：
+
+```bash
+# 混合精度 + 累积 + 检查点（单卡短训）
+python scripts/train.py training=sft engineering.mixed_precision=bf16 \
+  engineering.gradient_accumulation_steps=2 engineering.gradient_checkpointing=true \
+  training.max_steps=4
+python scripts/train.py training=dpo data=dpo_demo engineering.mixed_precision=bf16 training.max_steps=4
+python scripts/train.py training=grpo data=gsm8k engineering.mixed_precision=bf16 training.max_steps=2
+python scripts/train.py training=ppo data=gsm8k engineering.mixed_precision=bf16 training.max_steps=2
+
+# 完整断点恢复（SFT/DPO：二次续训看 global_step 连续）
+python scripts/train.py training=sft training.max_steps=4
+python scripts/train.py training=sft engineering.resume_from_checkpoint=true training.max_steps=8
+
+# DDP
+torchrun --nproc_per_node=2 scripts/train.py training=grpo data=gsm8k training.max_steps=2
+torchrun --nproc_per_node=2 scripts/train.py training=sft training.max_steps=4
+
+# 指标 / 显存（W&B）
+python scripts/train.py training=grpo data=gsm8k wandb=online training.max_steps=2
 ```
 
 ```bash
@@ -247,15 +322,40 @@ python scripts/train.py wandb=online wandb.project=my-ptl run_name=dpo-beta01
 
 ### 评测
 
+统一入口：`evaluate(config, checkpoint)`（`src/evaluators/service.py`）。支持显式路径、阶段别名（`sft|dpo|grpo|ppo`）与 Full / LoRA 加载；报告为标准化 `EvaluationResult` → `eval_report.json`。
+
+真实权重正确性为 **GPU_PENDING**；本地用 Mock 单测（`tests/test_checkpoint_eval.py`）。
+
 ```bash
-python scripts/eval.py eval=gsm8k model=qwen2.5-0.5b
+# 必须指定 checkpoint（路径或阶段别名）
+python scripts/eval.py eval=gsm8k data=gsm8k eval.checkpoint=sft
+python scripts/eval.py eval=humaneval data=humaneval eval.checkpoint=outputs/checkpoints/sft/checkpoint-20
+python scripts/eval.py eval=humaneval data=humaneval \
+  eval.checkpoint=sft eval.num_samples=10 eval.k=10 eval.temperature=0.2
 ```
 
 ### 消融实验
 
+`ExperimentPlanner` → `ExperimentRunner` →（可选）`ResultAggregator`。默认 **`experiment.dry_run=true`**，避免本地误启真实训练。
+
+DPO β 消融默认：**3 个 `fixed_beta` × 3 个 seed = 9 runs**。
+
 ```bash
-python scripts/ablation.py experiment=ablation
+# 本地：只生成 plan / dry_run 状态（安全）
+python scripts/ablation.py
+
+# 已有 runs 时仅重生成报告（不训练）
+python scripts/ablation.py experiment.report_only=true
+
+# GPU：真实训练 + 自动评测 + 汇总报告
+python scripts/ablation.py experiment.dry_run=false
 ```
+
+产物：`outputs/ablation/<name>/` → `results.csv`、`summary.csv`、`report.md`、`plots/*.png`。
+
+CPU 报告闭环测试：`py -3.12 -m pytest tests/test_result_aggregator.py tests/test_ablation_report_e2e.py -q`  
+样例（**test_fixture**）：`python scripts/generate_cpu_ablation_fixture.py`  
+GPU 验收清单见 [`docs/gpu_validation.md`](docs/gpu_validation.md)。
 
 ## 核心算法亮点
 
@@ -267,6 +367,7 @@ python scripts/ablation.py experiment=ablation
 | `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL；引擎消费 AssembledBatch |
 | `trainers/ppo_trainer.py` | TRL `PPOTrainer` + 自研奖励在线循环；与 GRPO 对照消融 |
 | `scripts/pipeline.py` | SFT→DPO→RL 一键链路（`init_from_checkpoint` 衔接） |
+| `evaluators/` + `scripts/eval.py` | GSM8K 准确率/格式率；HumanEval 测例 pass@k |
 
 ## 实验结果
 

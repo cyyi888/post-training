@@ -7,32 +7,30 @@ defaults:
 
 experiment:
   name: ablation_dpo_beta
-  description: "Ablate DPO/IPO + fixed/dynamic beta"
+  description: "DPO fixed beta × multi-seed ablation (3 beta × 3 seed = 9)"
+  # 本地默认 dry_run=true，避免误启真实训练；GPU 验收时显式 false
+  dry_run: true
+  # 仅根据已有 runs 重生成 CSV/MD/PNG，不训练
+  report_only: false
+  # 仅重试评测（保留 checkpoint）；用于 train_ok / eval_failed
+  eval_only: false
   track_wandb: false
-  variants:
-    - name: dpo_fixed_beta_0.1
-      overrides:
-        training.loss_type: dpo
-        training.beta_mode: fixed
-        training.fixed_beta: 0.1
-        training.penalty.enabled: false
-    - name: dpo_fixed_beta_0.5
-      overrides:
-        training.loss_type: dpo
-        training.beta_mode: fixed
-        training.fixed_beta: 0.5
-        training.penalty.enabled: false
-    - name: ipo_fixed_beta_0.1
-      overrides:
-        training.loss_type: ipo
-        training.beta_mode: fixed
-        training.fixed_beta: 0.1
-        training.margin: 1.0
-        training.penalty.enabled: false
-    - name: dpo_dynamic_beta
-      overrides:
-        training.loss_type: dpo
-        training.beta_mode: dynamic
-        training.dynamic_beta.init_beta: 0.1
-        training.dynamic_beta.target_kl: 4.0
-        training.penalty.enabled: false
+  max_retries: 1
+  skip_completed: true
+  auto_eval: true
+  aggregate: true
+  require_plots: true
+  eval_task: gsm8k
+  # 汇总时的 baseline variant 名；null 则取 sweep 第一档
+  baseline_variant: null
+  retry_on_eval_failure: false
+  retry_backoff_sec: 0
+  seeds: [12, 34, 56]
+  # 单变量 sweep：与 seeds 笛卡尔积 → 9 runs
+  sweep:
+    training.fixed_beta: [0.1, 0.5, 1.0]
+  # 固定其它训练字段（经 Hydra 基座 + 下列默认；也可写入 baseline_overrides）
+  baseline_overrides:
+    training.loss_type: dpo
+    training.beta_mode: fixed
+    training.penalty.enabled: false

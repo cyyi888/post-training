@@ -1,0 +1,17 @@
+task: humaneval
+checkpoint: null
+metrics:
+  - pass_at_1
+  - pass_rate
+  - compile_rate
+batch_size: 1
+max_new_tokens: 512
+# n 次采样；k 用于 pass@k（需 k <= num_samples）
+num_samples: 1
+k: 1
+# num_samples>1 时建议提高 temperature 以估计 pass@k
+temperature: 0.2
+top_p: 0.95
+timeout: 3.0
+save_report: true
+report_name: humaneval_eval_report.json

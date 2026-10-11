@@ -137,6 +137,7 @@ def build_posttrain_sft_trainer(
     sampler_config: dict[str, Any] | None = None,
     grad_clip_raw: Any = None,
     default_max_norm: float = 1.0,
+    callbacks: list[Any] | None = None,
 ) -> PostTrainSFTTrainer:
     """工厂：组装 PostTrainSFTTrainer（含裁剪器）。"""
     clipper = None
@@ -156,4 +157,5 @@ def build_posttrain_sft_trainer(
         processing_class=tokenizer,
         sampler_config=sampler_config,
         grad_clipper=clipper,
+        callbacks=callbacks,
     )

@@ -1,8 +1,16 @@
+# 默认评测：GSM8K
 task: gsm8k
+# 待评测 checkpoint：路径 | sft|dpo|grpo|ppo | latest | null（必须显式指定或由 CLI 覆盖）
+checkpoint: null
 metrics:
   - accuracy
   - format_rate
 batch_size: 1
 max_new_tokens: 512
+num_samples: 1
+k: 1
+temperature: 0.0
+top_p: 1.0
+timeout: 3.0
 save_report: true
 report_name: eval_report.json

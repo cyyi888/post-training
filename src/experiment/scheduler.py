@@ -1,3 +1,5 @@
+"""兼容旧 AblationScheduler；新代码请用 ExperimentPlanner + ExperimentRunner。"""
+
 from __future__ import annotations
 
 import json
@@ -6,23 +8,27 @@ from typing import Any, Callable
 
 from omegaconf import OmegaConf
 
+from src.experiment.planner import ExperimentPlanner
+from src.experiment.runner import ExperimentRunner
+
 
 class AblationScheduler:
     """
     Expand experiment.variants into concrete configs and run a user callback.
 
     The callback signature is ``fn(cfg, variant_name) -> dict metrics``.
+    新消融流程请改用 :class:`ExperimentRunner`（支持 seed / dry-run / 重试 / 自动评测）。
     """
 
     def __init__(self, cfg: Any):
         self.cfg = cfg
         self.exp = cfg.experiment
         self.results: list[dict[str, Any]] = []
+        self.planner = ExperimentPlanner(cfg)
 
     def iter_variants(self):
         for variant in self.exp.variants:
             base = OmegaConf.to_container(self.cfg, resolve=True)
-            # Drop nested experiment to avoid recursive expansion
             base.pop("experiment", None)
             merged = OmegaConf.create(base)
             overrides = variant.get("overrides", {})
@@ -48,3 +54,6 @@ class AblationScheduler:
             json.dump(self.results, f, indent=2, ensure_ascii=False)
         print(f"Ablation summary → {summary_path}")
         return self.results
+
+
+__all__ = ["AblationScheduler", "ExperimentPlanner", "ExperimentRunner"]
