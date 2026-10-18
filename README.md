@@ -1,6 +1,6 @@
 # PostTrainLab
 
-统一的大模型后训练实验平台：SFT → DPO/IPO → GRPO，配合 Hydra 分层配置与消融实验调度。
+统一的大模型后训练实验平台：SFT → DPO/IPO → GRPO / PPO，配合 Hydra 分层配置、一键 Pipeline 与消融调度。
 
 ## 硬性约定：模型只用 Qwen2.5-0.5B
 
@@ -34,20 +34,24 @@
 
 ```
 PostTrainLab/
-├── configs/          # Hydra 分层配置（model / data / training / eval / experiment）
+├── configs/          # Hydra 分层配置（model / data / training / eval / experiment / chat_template / logging）
 ├── src/
 │   ├── core/         # 统一基类与接口
 │   ├── data/         # 统一 Sample 流水线：适配器/清洗/划分/版本/Chat Template
 │   ├── models/       # 模型加载、LoRA
 │   ├── algorithms/   # 自研 DPO/IPO Loss、动态 β、GRPO、SFT 采样/裁剪
 │   ├── trainers/     # SFT(TRL) / DPO(TRL+自研Loss) / GRPO / PPO(TRL 基线)
-│   ├── evaluators/   # 任务评测与报告
-│   ├── experiment/   # 消融调度与追踪
-│   └── utils/        # 通用工具
-├── scripts/          # 一键训练 / 评测 / 消融
-├── tests/            # 单元测试（含 DPO Loss 正确性）
-├── benchmarks/       # 评测数据集
-└── outputs/          # checkpoints / logs / wandb
+│   ├── evaluators/   # 任务评测与报告（GSM8K / HumanEval）
+│   ├── experiment/   # Planner / Runner / ResultAggregator（消融）
+│   └── utils/        # MetricSink、W&B、日志、种子等通用工具
+├── scripts/          # train / eval / pipeline / ablation / GPU bootstrap
+├── benchmarks/       # 本地评测切分与缓存占位（大数据运行时从 Hugging Face 拉取）
+├── tests/            # 单元与 CPU Mock / GPU 冒烟（CUDA 时）测试
+├── docs/             # GPU 验收、Smoke 清单、训练就绪与预训练阻塞说明
+├── legacy/           # 迁移前的独立脚本，仅作对照，新开发不依赖
+├── outputs/          # checkpoints / logs / wandb / ablation / data_versions
+├── Dockerfile
+└── pyproject.toml
 ```
 
 ```mermaid
@@ -103,6 +107,10 @@ source .venv/bin/activate
 # 编辑 .env，填入 WANDB_API_KEY（从 https://wandb.ai/authorize 复制）
 # 之后一般不必再执行 wandb login
 
+# GPU 一键上机（环境/下载/CPU测/SFT→DPO→GRPO Smoke；失败打印 FAILED AT）
+bash scripts/run_gpu_bootstrap.sh
+
+
 # 或 Docker
 docker build -t posttrainlab .
 docker run --gpus all -it -v $(pwd)/outputs:/workspace/outputs posttrainlab
@@ -112,7 +120,9 @@ docker run --gpus all -it -v $(pwd)/outputs:/workspace/outputs posttrainlab
 
 ### 训练
 
-日志、W&B、断点续训、分布式，以及梯度累积、混合精度、梯度检查点、随机种子和学习率调度都由 `BaseTrainer` 统一处理。SFT / DPO / GRPO / PPO 只实现算法。各算法 yaml 里的学习率、累积步数、调度器仍然生效；要全局覆盖时用 `engineering.*=...`。
+`BaseTrainer` 统一训练生命周期、工程配置与公共能力接入（日志、`MetricSink`→W&B、断点/init_from 解析、分布式探测、梯度累积/混合精度/梯度检查点、种子与 LR 调度）；**不同算法保留各自执行后端**（SFT/DPO→TRL Trainer，GRPO→`GRPOEngine`，PPO→TRL PPO 基线）。各算法 yaml 里的学习率、累积步数、调度器仍然生效；要全局覆盖时用 `engineering.*=...`。HF/TRL 的 `report_to` 固定为 `none`，避免与 MetricSink 双写。
+
+依赖钉死：`transformers>=4.51,<5` 与 `trl>=0.15,<1`（见 `pyproject.toml`）。**勿**直接 `pip install trl` 装到 1.x：会破坏自研 `CustomDPOTrainer` 所用的 `get_batch_loss_metrics` / `concatenated_forward`。
 
 #### SFT 基线（TRL + Full/LoRA 对比）
 
@@ -194,9 +204,10 @@ python scripts/train.py training=grpo data=gsm8k \
 python scripts/train.py training=grpo data=gsm8k \
   training.rollout.fix_generation_seed=true training.rollout.generation_seed=42
 
-# PPO 对照基线（需环境含 TRL PPOTrainer；可接上游 DPO 权重）
-python scripts/train.py training=ppo data=gsm8k training.max_steps=20 \
-  engineering.init_from_checkpoint=dpo
+# PPO 对照基线（当前声明栈 trl 0.15–0.x 无 classic step()，默认 online_loop 会明确报错；
+# GPU Smoke 请用 GRPO。若强跑 PPO，需另找仍提供 step() 的旧 trl，且可能与 DPO 钉死冲突）
+# python scripts/train.py training=ppo data=gsm8k training.max_steps=20 \
+#   engineering.init_from_checkpoint=dpo
 ```
 
 #### SFT → DPO → RL 完整链路
@@ -204,11 +215,11 @@ python scripts/train.py training=ppo data=gsm8k training.max_steps=20 \
 跨阶段用 `engineering.init_from_checkpoint` **只加载权重、步数从 0 开始**（与同阶段 `resume_from_checkpoint` 续训区分）。别名 `sft` / `dpo` / `grpo` / `ppo` 指向 `outputs/checkpoints/<stage>` 下最新目录。
 
 ```bash
-# 一键链路（默认 max_steps=20 冒烟；末段 rl_algorithm=grpo）
+# 一键链路（默认 dry_run=true，只打印命令；末段 rl_algorithm=grpo）
 python scripts/pipeline.py
-python scripts/pipeline.py pipeline.dry_run=true          # 只打印命令
-python scripts/pipeline.py pipeline.rl_algorithm=ppo      # 末段改 PPO
-python scripts/pipeline.py pipeline.max_steps=null        # 按各 yaml 正式训
+python scripts/pipeline.py pipeline.dry_run=false pipeline.max_steps=4   # 真冒烟需显式关 dry_run
+python scripts/pipeline.py pipeline.dry_run=false pipeline.rl_algorithm=ppo pipeline.max_steps=4
+# 正式长训：pipeline.dry_run=false pipeline.max_steps=null
 
 # 或分阶段手动衔接
 python scripts/train.py training=sft data=gsm8k training.max_steps=20
@@ -224,15 +235,23 @@ python scripts/train.py training=grpo data=gsm8k \
 - **GPU（无 CUDA 自动 skip；基座仅 Qwen2.5-0.5B）**：DPO / GRPO / PPO 端到端短训冒烟。
 
 ```bash
-# CPU 轻量（日常）
+# CPU 轻量（日常；建议 Python ≥3.10，推荐 3.12）
 pytest tests/test_dpo_losses.py tests/test_grpo_loss.py tests/test_rewards.py \
   tests/test_evaluators.py tests/test_rollout.py tests/test_data_pipeline.py \
   tests/test_pipeline_offline.py tests/test_pipeline_chain.py tests/test_sft_baseline.py \
-  tests/test_trainers_strategy.py tests/test_versioning.py tests/test_wandb_utils.py -q
+  tests/test_trainers_strategy.py tests/test_versioning.py tests/test_wandb_utils.py \
+  tests/test_metric_sink.py tests/test_checkpoint_eval.py \
+  tests/test_result_aggregator.py tests/test_ablation_report_e2e.py \
+  tests/test_experiment_planner_runner.py -q
 
-# GPU 流水线冒烟
+# GPU 流水线冒烟（无 CUDA 自动 skip）
 pytest tests/test_dpo_pipeline.py tests/test_grpo_pipeline.py tests/test_ppo_pipeline.py -v
 ```
+
+- 训练前阻断项：[`docs/pretrain_blockers.md`](docs/pretrain_blockers.md)
+- GPU Smoke 顺序：[`docs/gpu_smoke_test.md`](docs/gpu_smoke_test.md)
+- Week4 验收项：[`docs/gpu_validation.md`](docs/gpu_validation.md)
+- CPU 准入结论：[`docs/training_readiness.md`](docs/training_readiness.md)
 
 #### 工程能力测试矩阵
 
@@ -248,23 +267,26 @@ pytest tests/test_dpo_pipeline.py tests/test_grpo_pipeline.py tests/test_ppo_pip
 
 | 能力 | SFT | DPO | GRPO | PPO |
 |------|-----|-----|------|-----|
-| BF16/FP16 | CPU测 | CPU测 | CPU测 | CPU测 |
-| 梯度累积 | CPU测 | CPU测 | CPU测 | CPU测 |
-| 梯度检查点 | CPU测 | CPU测 | CPU测 | CPU测 |
-| LoRA | CPU测 | CPU测 | CPU测 | CPU测 |
-| DDP | 待验证 | 待验证 | 待验证 | 待验证 |
-| 完整断点恢复 | 待验证 | 待验证 | 部分(仅权重) | 部分(online仅权重) |
-| 过程指标上报 | CPU测 | CPU测 | CPU测 | CPU测 |
+| BF16/FP16 | CPU测 | CPU测 | CPU测 | 未接线* |
+| 梯度累积 | CPU测 | CPU测 | CPU测 | 未接线* |
+| 梯度检查点 | CPU测 | CPU测 | CPU测 | 未接线* |
+| LoRA | CPU测 | CPU测 | CPU测 | 未接线* |
+| DDP | 待验证 | 待验证 | 待验证 | 未接线* |
+| 完整断点恢复 | 待验证 | 待验证 | 部分(仅权重) | 未接线* |
+| 过程指标上报 | CPU测 | CPU测 | CPU测 | 部分(代码已写)* |
 | 显存监控 | 未接线 | 未接线 | 待验证 | 未接线 |
+
+\* **PPO**：入口与代码路径存在，但当前钉死的 `trl>=0.15,<1` 中 `PPOTrainer` **无** classic `step()`，默认 `online_loop=true` 会在启动时报错。GPU Smoke **以 GRPO 为主路径**；勿将 PPO 标为通过。
 
 接线与完成度备注（改实现或 GPU 实测后同步改矩阵）：
 
 - **BF16/FP16 / 梯度累积 / 梯度检查点**：`BaseTrainer.resolve_runtime` → SFT/DPO/PPO 进 HF/TRL args；GRPO 进 `GRPOEngine`（autocast + accum）；`apply_gradient_checkpointing` 统一开启。CPU：`test_trainers_strategy` 已断言配置合并与 `hf_training_kwargs`；**AMP/累积真实数值行为仍 GPU_PENDING**。
 - **LoRA**：PEFT LoRA 训练与评测加载路径已实现；Checkpoint Full/LoRA 分支有 CPU Mock（`test_checkpoint_eval`）。本项目不做量化 LoRA；真实 GPU 训/评仍 **GPU_PENDING**。
 - **DDP**：HF 靠 `local_rank`；GRPO 用 `prepare_native_model` 包 DDP。缺 `torchrun` 实测 → 待验证。
-- **完整断点恢复**：路径解析/init_from CPU 有测；SFT/DPO 生产走 `Trainer.train(resume_from_checkpoint=…)`（DPO 另存动态 β），**完整 optimizer/step 续训未 GPU 实测**；GRPO / PPO(online) **仅恢复 adapter 权重**。
+- **完整断点恢复**：路径解析/init_from CPU 有测；显式 `init_from_checkpoint` 缺权重时 **硬失败**（禁止静默回退基座）。SFT/DPO 生产走 `Trainer.train(resume_from_checkpoint=…)`（DPO 另存动态 β），**完整 optimizer/step 续训未 GPU 实测**；GRPO **仅恢复 adapter 权重**。
 - **过程指标上报**：统一 `MetricSink` + `track_metrics`（HF `report_to` 禁直连防重复）；CPU：`test_metric_sink` / `test_wandb_utils` 已过。**真实 W&B online 曲线仍 GPU_PENDING**。
-- **显存监控**：仅 GRPO Rollout 上报 `perf/peak_mem_gb`（待 GPU 勾选）；SFT/DPO/PPO **未接线**。
+- **显存监控**：仅 GRPO Rollout 上报 `perf/peak_mem_gb`（待 GPU 勾选）；SFT/DPO **未接线**。
+- **PPO**：对照入口保留；当前依赖钉死下默认路径 **不可跑通**（见上表 \*）。
 
 建议验证命令（通过后把对应格改为「通过」）：
 

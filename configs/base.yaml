@@ -14,8 +14,9 @@ output_dir: outputs
 hf_endpoint: https://hf-mirror.com
 use_gpu: true
 
-# TRL/HF Trainer 上报目标；wandb.enabled=true 时由 runtime 自动改为 wandb
-report_to: none  # none | wandb | tensorboard
+# 顶层标记：是否启用实验追踪（W&B）。HF/TRL Trainer 的 report_to 由
+# resolve_hf_report_to 固定为 none，指标只走 MetricSink，避免重复上报。
+report_to: none  # none | wandb | tensorboard（顶层语义；非 HF TrainingArguments）
 
 # 可选：覆盖自动生成的 run 名（否则用 {algorithm}-{model_short}）
 run_name: null

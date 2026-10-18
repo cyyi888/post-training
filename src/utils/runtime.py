@@ -33,7 +33,7 @@ def prepare_runtime(cfg: DictConfig, *, init_wb: bool = True) -> Any:
     if env_path is not None:
         logger.info("Loaded environment from %s", env_path)
 
-    # Keep TRL report_to in sync with wandb group
+    # 顶层 report_to：是否开 W&B 的标记。HF Trainer 实际 args 见 resolve_hf_report_to（恒 none）
     report_to = resolve_report_to(cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.report_to = report_to

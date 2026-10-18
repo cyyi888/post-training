@@ -12,8 +12,10 @@ license = { text = "MIT" }
 authors = [{ name = "PostTrainLab" }]
 dependencies = [
     "torch>=2.1.0",
-    "transformers>=4.51.0",
-    "trl>=0.15.0",
+    # TRL 1.x 重写了 DPOTrainer（移除 get_batch_loss_metrics / concatenated_forward），
+    # 与自研 CustomDPOTrainer 不兼容；且需搭配 transformers 4.x。
+    "transformers>=4.51.0,<5.0.0",
+    "trl>=0.15.0,<1.0.0",
     "datasets>=2.18.0",
     "accelerate>=0.27.0",
     "peft>=0.10.0",

@@ -111,6 +111,19 @@ def test_resolve_init_from_stage_alias(tmpdir):
     assert found.endswith("checkpoint-3")
 
 
+def test_resolve_init_from_missing_stage_raises(tmpdir):
+    """显式阶段别名无权重时必须失败，禁止静默回退基座。"""
+    import pytest
+
+    trainer = _toy()
+    cfg = _Cfg(
+        output_dir=str(tmpdir),
+        engineering=_Cfg(init_from_checkpoint="sft", resume_from_checkpoint=None),
+    )
+    with pytest.raises(FileNotFoundError, match="禁止静默回退"):
+        trainer.resolve_init_from(cfg)
+
+
 def test_resolve_init_from_skipped_when_resume(tmpdir):
     """resume 优先时 build_context 不应再解析 init（此处测 resolve 本身仍可读）。"""
     root = Path(str(tmpdir))

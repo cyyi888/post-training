@@ -133,6 +133,15 @@ class PPOStageTrainer(BaseTrainer):
         runtime = ctx.runtime
         ppo_section = tcfg.get("ppo") or {}
         online_loop = bool(ppo_section.get("online_loop", True))
+        # 声明栈（trl 0.15–0.x）的 PPOTrainer 多为 HF Trainer 风格，无 classic step()。
+        # 默认 online_loop 依赖 step()；缺 API 时立刻失败，避免训到一半才崩。
+        if online_loop and not hasattr(PPOTrainer, "step"):
+            raise RuntimeError(
+                "当前 TRL PPOTrainer 无 step()，无法跑默认 online_loop"
+                "（generate→RewardEngine→step）。"
+                "请改用自研主路径 training=grpo，或安装仍提供 classic PPO.step 的旧版 trl"
+                "（不推荐：会与本仓库 DPO 钉死的 trl>=0.15,<1 冲突）。"
+            )
         ppo_cfg_kwargs = _filter_kwargs(
             PPOConfig,
             {

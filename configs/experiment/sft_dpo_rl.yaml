@@ -11,8 +11,8 @@ pipeline:
   max_steps: 20
   # 末段：grpo（自研在线 RL 主路径）或 ppo（TRL 对照）
   rl_algorithm: grpo
-  # true 只打印将要执行的命令，不训练
-  dry_run: false
+  # 默认 true，避免误启完整链路；真实冒烟请显式 pipeline.dry_run=false
+  dry_run: true
   stages:
     - name: sft
       overrides:

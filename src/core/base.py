@@ -473,15 +473,20 @@ class BaseTrainer(ABC):
             root = Path(str(config.get("output_dir", "outputs"))) / STAGE_CHECKPOINT_SUBDIRS[key]
             found = self.latest_checkpoint(str(root))
             if not found:
-                self.logger.warning("上游阶段 '%s' 无可用 checkpoint: %s", key, root)
+                raise FileNotFoundError(
+                    f"engineering.init_from_checkpoint={key!r} 但未找到可用权重: {root}。"
+                    f"请先完成上游训练，或改用显式路径；禁止静默回退到基座模型。"
+                )
             return found
         path = Path(str(flag))
         if path.is_dir():
             found = self.latest_checkpoint(str(path))
             return found or str(path)
         if not path.exists():
-            self.logger.warning("指定的 init_from_checkpoint 不存在: %s", path)
-            return None
+            raise FileNotFoundError(
+                f"engineering.init_from_checkpoint 路径不存在: {path}。"
+                f"禁止静默回退到基座模型。"
+            )
         return str(path)
 
     @staticmethod
@@ -508,8 +513,9 @@ class BaseTrainer(ABC):
             return model
         path = Path(init_from)
         if not path.exists():
-            self.logger.warning("init_from_checkpoint 路径不存在: %s", path)
-            return model
+            raise FileNotFoundError(
+                f"init_from_checkpoint 路径不存在: {path}。禁止静默回退到基座模型。"
+            )
 
         if (path / "adapter_config.json").is_file():
             self.logger.info("加载上游 LoRA adapter: %s", path)
@@ -533,8 +539,10 @@ class BaseTrainer(ABC):
                     model.print_trainable_parameters()
             return model
 
-        self.logger.warning("无法识别的 checkpoint 目录（缺 adapter_config.json / config.json）: %s", path)
-        return model
+        raise ValueError(
+            f"无法识别的 checkpoint 目录（缺 adapter_config.json / config.json）: {path}。"
+            f"禁止静默回退到基座模型。"
+        )
 
     def load_adapter_resume(self, model: Any, resume_from: str | None) -> Any:
         """若目录里是 LoRA adapter，则加载到当前模型上（同阶段续训）。"""
