@@ -4,12 +4,8 @@
 """
 
 __all__ = [
-    "DPOLoss",
     "DPOLossConfig",
-    "compute_dpo_loss",
-    "compute_ipo_loss",
     "compute_preference_loss",
-    "compute_variant_loss",
     "dpo_loss",
     "ipo_loss",
     "DynamicBetaController",
@@ -24,12 +20,8 @@ __all__ = [
 ]
 
 _DPO_LOSS_EXPORTS = {
-    "DPOLoss",
     "DPOLossConfig",
-    "compute_dpo_loss",
-    "compute_ipo_loss",
     "compute_preference_loss",
-    "compute_variant_loss",
     "dpo_loss",
     "ipo_loss",
 }

@@ -15,13 +15,10 @@ from .versioning import (
     verify_version,
 )
 
-# 依赖 datasets / 较重组件：按需导入，避免纯单测环境强依赖
+# 依赖 datasets：按需导入，避免纯单测环境强依赖
 try:
-    from .loaders import load_preference_dataset, load_task_dataset
     from .pipeline import build_pipeline, build_samples
 except ImportError:  # pragma: no cover
-    load_preference_dataset = None  # type: ignore[assignment]
-    load_task_dataset = None  # type: ignore[assignment]
     build_pipeline = None  # type: ignore[assignment]
     build_samples = None  # type: ignore[assignment]
 
@@ -32,8 +29,6 @@ __all__ = [
     "split_samples",
     "build_pipeline",
     "build_samples",
-    "load_task_dataset",
-    "load_preference_dataset",
     "apply_chat_template_config",
     "render_chat",
     "DatasetVersion",

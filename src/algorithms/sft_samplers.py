@@ -278,8 +278,3 @@ def length_group_waste_ratio(lengths: Sequence[int], order: Sequence[int], batch
         waste += sum(maxlen - L for L in batch_lens)
         tokens += maxlen * len(batch_lens)
     return waste / tokens if tokens else 0.0
-
-
-def suggest_mega_batch_size(batch_size: int, grad_accum: int, mult: int, world_size: int = 1) -> int:
-    """推荐 mega-batch = 微批 × 累积 × 倍数 × 卡数。"""
-    return max(1, int(batch_size) * max(1, int(grad_accum)) * max(1, int(mult)) * max(1, int(world_size)))

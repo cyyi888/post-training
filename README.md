@@ -383,7 +383,7 @@ GPU 验收清单见 [`docs/gpu_validation.md`](docs/gpu_validation.md)。
 
 | 模块 | 说明 |
 |------|------|
-| `algorithms/dpo_losses.py` + `dynamic_beta.py` | 自研 DPO / IPO（公式+Config+兼容入口）+ 动态 β；`dpo_loss` / `dpo_variants` 为再导出；训练见 `trainers/dpo_trainer` |
+| `algorithms/dpo_losses.py` + `dynamic_beta.py` | 自研 DPO / IPO（公式 + Config + `compute_preference_loss`）+ 动态 β；训练见 `trainers/dpo_trainer` |
 | `algorithms/reward_functions.py` | GRPO 可插拔奖励：accuracy / format / length / **steps（逐步）** / **code（编译+测例）** |
 | `algorithms/rollout.py` | GRPO 6 步 Rollout：分桶、批量生成、拒绝采样、组内组装、指标 |
 | `algorithms/grpo_loss.py` + `grpo_engine.py` | 自研 GRPO：组内优势、PPO-clip、参考 KL；引擎消费 AssembledBatch |

@@ -84,34 +84,28 @@ def version_dir_for(out_dir: str | Path, meta: DatasetVersion) -> Path:
 def save_version(
     meta: DatasetVersion,
     out_dir: str | Path,
-    *,
-    use_version_subdir: bool = True,
 ) -> Path:
     """
     写入 dataset_version.json。
 
-    - use_version_subdir=True：落到 ``out_dir/<version>/dataset_version.json``
-      并额外在 out_dir 写一份 ``latest.json`` 指针，便于实验快速引用。
-    - False：直接写 ``out_dir/dataset_version.json``（兼容旧行为）。
+    落到 ``out_dir/<version>/dataset_version.json``，并在 out_dir 额外写一份
+    ``latest.json`` 指针，便于实验快速引用。
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if use_version_subdir:
-        target = version_dir_for(out_dir, meta)
-        target.mkdir(parents=True, exist_ok=True)
-        path = target / "dataset_version.json"
-        latest = out_dir / "latest.json"
-        latest.write_text(
-            json.dumps(
-                {"version": meta.version, "hash": meta.hash, "path": str(path)},
-                indent=2,
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-    else:
-        path = out_dir / "dataset_version.json"
+    target = version_dir_for(out_dir, meta)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / "dataset_version.json"
+    latest = out_dir / "latest.json"
+    latest.write_text(
+        json.dumps(
+            {"version": meta.version, "hash": meta.hash, "path": str(path)},
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     path.write_text(
         json.dumps(meta.to_dict(), indent=2, ensure_ascii=False),

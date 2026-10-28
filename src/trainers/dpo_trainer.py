@@ -49,25 +49,37 @@ def _filter_kwargs(fn: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_beta_mode(tcfg: Any) -> str:
-    mode = tcfg.get("beta_mode", None)
-    if mode is not None:
-        return str(mode).lower()
-    dyn = tcfg.get("dynamic_beta", False)
-    if isinstance(dyn, bool):
-        return "dynamic" if dyn else "fixed"
-    # 旧配置把 dynamic_beta 写成嵌套表时，默认视为启用动态 β
-    return "dynamic" if dyn else "fixed"
+    mode = str(tcfg.get("beta_mode", "fixed")).lower()
+    if mode not in ("fixed", "dynamic"):
+        raise ValueError(f"training.beta_mode 必须是 fixed|dynamic，收到: {mode!r}")
+    return mode
 
 
 def _resolve_fixed_beta(tcfg: Any) -> float:
     if tcfg.get("fixed_beta") is not None:
         return float(tcfg.get("fixed_beta"))
-    return float(tcfg.get("beta", 0.1))
+    return 0.1
+
+
+def _resolve_dynamic_beta_section(tcfg: Any) -> dict[str, Any]:
+    dyn = tcfg.get("dynamic_beta")
+    if isinstance(dyn, bool):
+        raise ValueError(
+            "training.dynamic_beta 必须是嵌套表（init_beta/target_kl/...），"
+            "不再接受 bool；请改用 training.beta_mode=fixed|dynamic"
+        )
+    if tcfg.get("beta") is not None:
+        logger.warning(
+            "已忽略旧字段 training.beta=%s；请改用 training.fixed_beta / "
+            "training.dynamic_beta.init_beta",
+            tcfg.get("beta"),
+        )
+    return _as_dict(dyn)
 
 
 def _build_loss_cfg(tcfg: Any) -> DPOLossConfig:
     pen = _as_dict(tcfg.get("penalty"))
-    dyn = _as_dict(tcfg.get("dynamic_beta")) if not isinstance(tcfg.get("dynamic_beta"), bool) else {}
+    dyn = _resolve_dynamic_beta_section(tcfg)
     beta_mode = _resolve_beta_mode(tcfg)
     fixed_beta = _resolve_fixed_beta(tcfg)
     init_beta = float(dyn.get("init_beta", fixed_beta))
@@ -75,11 +87,10 @@ def _build_loss_cfg(tcfg: Any) -> DPOLossConfig:
         loss_type=str(tcfg.get("loss_type", "dpo")),
         beta=init_beta if beta_mode == "dynamic" else fixed_beta,
         beta_mode=beta_mode,
-        dynamic_beta=beta_mode == "dynamic",
-        beta_min=float(dyn.get("min_beta", tcfg.get("beta_min", 0.01))),
-        beta_max=float(dyn.get("max_beta", tcfg.get("beta_max", 1.0))),
-        target_kl=float(dyn.get("target_kl", tcfg.get("target_kl", 4.0))),
-        adjust_rate=float(dyn.get("adjust_rate", tcfg.get("adjust_rate", 0.1))),
+        beta_min=float(dyn.get("min_beta", 0.01)),
+        beta_max=float(dyn.get("max_beta", 1.0)),
+        target_kl=float(dyn.get("target_kl", 4.0)),
+        adjust_rate=float(dyn.get("adjust_rate", 0.1)),
         margin=float(tcfg.get("margin", 1.0)),
         label_smoothing=float(tcfg.get("label_smoothing", 0.0)),
         penalty_enabled=bool(pen.get("enabled", False)),
@@ -409,8 +420,8 @@ class DPOStageTrainer(BaseTrainer):
             "args": args,
             "train_dataset": ctx.train_dataset,
             "eval_dataset": eval_ds,
+            # TRL 0.15+ 用 processing_class；勿再传 tokenizer（0.29 会 TypeError）
             "processing_class": ctx.tokenizer,
-            "tokenizer": ctx.tokenizer,
             "callbacks": [self.make_hf_metrics_callback()],
             "custom_loss_type": loss_cfg.loss_type,
             "beta_mode": loss_cfg.resolved_beta_mode(),

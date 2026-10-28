@@ -61,8 +61,6 @@ class RolloutConfig:
     max_group_resample: int = 2
     min_valid_per_group: int = 2
     require_answer_format: bool = True
-    # 兼容旧配置名
-    require_boxed: bool | None = None
     filter_extreme_length: bool = True
     clear_cache: bool = True
     # 训练默认 False 保多样性；消融对比时 True + generation_seed
@@ -71,8 +69,7 @@ class RolloutConfig:
     length_reward: LengthRewardConfig = field(default_factory=LengthRewardConfig)
 
     def __post_init__(self) -> None:
-        if self.require_boxed is not None:
-            self.require_answer_format = bool(self.require_boxed)
+        pass
 
     @classmethod
     def from_mapping(cls, cfg: Any | None = None, **overrides: Any) -> "RolloutConfig":
@@ -107,10 +104,6 @@ class RolloutConfig:
         else:
             bbs = None
 
-        require_boxed = data.get("require_boxed", None)
-        if require_boxed is not None:
-            require_boxed = bool(require_boxed)
-
         return cls(
             num_generations=int(data.get("num_generations", 4)),
             max_completion_length=int(data.get("max_completion_length", 512)),
@@ -123,13 +116,7 @@ class RolloutConfig:
             max_resample=int(data.get("max_resample", 2)),
             max_group_resample=int(data.get("max_group_resample", 2)),
             min_valid_per_group=int(data.get("min_valid_per_group", 2)),
-            require_answer_format=bool(
-                data.get(
-                    "require_answer_format",
-                    True if require_boxed is None else require_boxed,
-                )
-            ),
-            require_boxed=require_boxed,
+            require_answer_format=bool(data.get("require_answer_format", True)),
             filter_extreme_length=bool(data.get("filter_extreme_length", True)),
             clear_cache=bool(data.get("clear_cache", True)),
             fix_generation_seed=bool(data.get("fix_generation_seed", False)),
@@ -299,29 +286,6 @@ def iter_dynamic_batches(
         yield [rows[i] for i in chunk]
 
 
-def order_rows_by_length(
-    rows: list[dict[str, Any]],
-    lengths: list[int],
-    *,
-    batch_size: int,
-    bucket: bool = True,
-    seed: int = 0,
-    boundaries: list[int] | None = None,
-) -> list[dict[str, Any]]:
-    """兼容旧接口：展平动态分桶后的顺序。"""
-    ordered: list[dict[str, Any]] = []
-    for batch in iter_dynamic_batches(
-        rows,
-        lengths,
-        base_batch_size=batch_size,
-        boundaries=boundaries,
-        bucket=bucket,
-        seed=seed,
-    ):
-        ordered.extend(batch)
-    return ordered
-
-
 def _strip_completion_ids(comp_ids: torch.Tensor, pad_token_id: int | None) -> torch.Tensor:
     if pad_token_id is None:
         return comp_ids
@@ -343,15 +307,12 @@ def validate_completion(
     token_ids: torch.Tensor,
     *,
     require_answer_format: bool = True,
-    require_boxed: bool | None = None,
     max_completion_length: int = 512,
     filter_extreme_length: bool = True,
     min_tokens: int = 16,
     max_tokens: int = 512,
 ) -> tuple[bool, str]:
     """格式校验：空串 / 无答案格式 / 长度极端异常。"""
-    if require_boxed is not None:
-        require_answer_format = bool(require_boxed)
     n = int(token_ids.numel())
     if n == 0:
         return False, "empty_tokens"

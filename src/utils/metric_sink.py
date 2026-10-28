@@ -138,7 +138,3 @@ def make_metric_sink_callback(sink: MetricSink | LogFn, *, algorithm: str = "sft
                     sink(mapped, step=step)
 
     return _MetricSinkCallback()
-
-
-# 兼容旧名
-MetricSinkCallback = make_metric_sink_callback

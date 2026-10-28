@@ -18,10 +18,9 @@ loss_type: dpo
 # IPO 合页 margin
 margin: 1.0
 
-# 固定 β / 动态 β
+# β 口径：beta_mode + fixed_beta + dynamic_beta{...}（勿再用顶层 beta / bool dynamic_beta）
 beta_mode: dynamic  # fixed | dynamic
 fixed_beta: 0.1
-
 dynamic_beta:
   init_beta: 0.1
   target_kl: 4.0
@@ -29,8 +28,6 @@ dynamic_beta:
   min_beta: 0.01
   max_beta: 1.0
 
-# 兼容旧字段（beta_mode 优先；dynamic_beta 为 bool 时仍可读）
-beta: 0.1
 label_smoothing: 0.0
 reference_free: false
 penalty:

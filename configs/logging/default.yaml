@@ -5,6 +5,7 @@ filename: run.log
 format: "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 datefmt: "%Y-%m-%d %H:%M:%S"
 # 同时把 Hydra/transformers 噪声压到 WARNING
+#把第三方库日志压低，少刷屏
 quiet_libs:
   - hydra
   - datasets

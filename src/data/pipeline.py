@@ -41,7 +41,7 @@ def _load_raw_rows(cfg: Any) -> list[dict[str, Any]]:
 
     # HuggingFace datasets
     ds_config = cfg.get("dataset_config")
-    split_name = cfg.get("split_train") or cfg.get("hf_split") or "train"
+    split_name = cfg.get("split_train") or "train"
     if ds_config is not None and str(ds_config) not in ("null", "None"):
         raw = load_dataset(source_str, str(ds_config), split=split_name)
     else:
@@ -62,13 +62,7 @@ def _maybe_cap(samples: list[Sample], n: int | None) -> list[Sample]:
 
 
 def build_samples(cfg: Any) -> list[Sample]:
-    fmt = str(cfg.get("format") or cfg.get("template") or "instruction")
-    # 兼容旧配置 template: gsm8k_boxed → format gsm8k
-    alias = {
-        "gsm8k_boxed": "gsm8k",
-        "sft_messages": "sharegpt",
-    }
-    fmt = alias.get(fmt, fmt)
+    fmt = str(cfg.get("format") or "instruction")
 
     rows = _load_raw_rows(cfg)
     adapter = get_adapter(fmt)
@@ -106,9 +100,7 @@ def build_pipeline(
         eval_overlay.split_train = data_cfg.split_eval
         eval_overlay.max_train_samples = data_cfg.get("max_eval_samples")
         eval_rows = _load_raw_rows(eval_overlay)
-        fmt = str(data_cfg.get("format") or data_cfg.get("template") or "instruction")
-        alias = {"gsm8k_boxed": "gsm8k", "sft_messages": "sharegpt"}
-        fmt = alias.get(fmt, fmt)
+        fmt = str(data_cfg.get("format") or "instruction")
         eval_samples = get_adapter(fmt).convert_many(
             eval_rows, system_prompt=data_cfg.get("system_prompt")
         )

@@ -37,12 +37,13 @@ def generate_response(model, tokenizer, user_message, system_message=None, max_n
             add_generation_prompt=True,
         )
     
+    #把 prompt 编成 PyTorch 张量
     model_input = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         outputs = model.generate(
             **model_input,
             max_new_tokens=max_new_tokens,
-            do_sample=False,
+            do_sample=False, #不采样，取概率最高的 token 作为输出
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )

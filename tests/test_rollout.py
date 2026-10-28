@@ -17,7 +17,6 @@ from src.algorithms.rollout import (
     RolloutConfig,
     assign_bucket_id,
     iter_dynamic_batches,
-    order_rows_by_length,
     resolve_bucket_batch_sizes,
     validate_completion,
 )
@@ -178,15 +177,19 @@ def test_iter_dynamic_batches_short_larger_than_long():
     assert long_batches and max(len(b) for b in long_batches) <= 2
 
 
-def test_order_rows_by_length_uses_buckets():
+def test_iter_dynamic_batches_order_covers_rows():
     rows = [
         {"prompt": [{"role": "user", "content": "a"}], "ground_truth": "1"},
         {"prompt": [{"role": "user", "content": "b" * 200}], "ground_truth": "2"},
     ]
     lengths = [5, 200]
-    ordered = order_rows_by_length(
-        rows, lengths, batch_size=1, bucket=True, seed=0, boundaries=[128, 256]
-    )
+    ordered = [
+        r
+        for batch in iter_dynamic_batches(
+            rows, lengths, base_batch_size=1, boundaries=[128, 256]
+        )
+        for r in batch
+    ]
     assert len(ordered) == 2
 
 

@@ -24,7 +24,7 @@ checkpoints/
 outputs/checkpoints/
 outputs/logs/
 outputs/wandb/
-wandb/
+/wandb/
 
 # Hydra
 outputs/*/

@@ -6,14 +6,12 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from src.algorithms.dpo_losses import (
-    DPOLoss,
     DPOLossConfig,
-    compute_dpo_loss,
-    compute_ipo_loss,
-    compute_variant_loss,
+    compute_preference_loss,
     dpo_loss,
     ipo_loss,
 )
@@ -123,40 +121,57 @@ def test_numerical_stability_extreme_gaps():
     assert all(torch.isfinite(torch.tensor(v)) for v in m2.values() if isinstance(v, float))
 
 
-def test_variant_dispatch_and_module():
+def test_preference_loss_dispatch():
     pc, pr, rc, rr = _logps(seed=4)
-    loss_a, _ = compute_variant_loss("dpo", pc, pr, rc, rr, DPOLossConfig(beta=0.2))
-    loss_b, _ = compute_dpo_loss(pc, pr, rc, rr, DPOLossConfig(beta=0.2))
-    assert abs(float(loss_a) - float(loss_b)) < 1e-6
-
-    loss_c, _ = compute_ipo_loss(pc, pr, rc, rr, DPOLossConfig(loss_type="ipo", margin=0.5))
-    assert torch.isfinite(loss_c)
-
-    module = DPOLoss(DPOLossConfig(loss_type="dpo", beta=0.1))
-    loss_d, metrics = module(pc, pr, rc, rr)
-    assert torch.isfinite(loss_d)
+    loss_dpo, metrics = compute_preference_loss(
+        "dpo", pc, pr, rc, rr, beta=0.2
+    )
+    loss_direct, _ = dpo_loss(pc, pr, rc, rr, beta=0.2)
+    assert abs(float(loss_dpo) - float(loss_direct)) < 1e-6
     assert "mean_kl" in metrics
 
+    loss_ipo, _ = compute_preference_loss(
+        "ipo", pc, pr, rc, rr, beta=0.1, margin=0.5
+    )
+    assert torch.isfinite(loss_ipo)
 
-def test_compat_shims_reexport():
-    """旧模块路径仍可导入，且对象与统一模块同一实现。"""
-    # 注意：``from src.algorithms import dpo_loss`` 会命中包级函数导出，
-    # 兼容 shim 子模块需用 ``import src.algorithms.dpo_loss``。
-    import src.algorithms.dpo_loss as legacy_cfg
-    import src.algorithms.dpo_losses as unified
-    import src.algorithms.dpo_variants as legacy_var
-
-    assert legacy_cfg.DPOLossConfig is unified.DPOLossConfig
-    assert legacy_cfg.compute_dpo_loss is unified.compute_dpo_loss
-    assert legacy_var.compute_ipo_loss is unified.compute_ipo_loss
-    assert legacy_var.compute_variant_loss is unified.compute_variant_loss
+    with pytest.raises(ValueError, match="未知 loss_type"):
+        compute_preference_loss("unknown", pc, pr, rc, rr, beta=0.1)
 
 
-def test_loss_config_beta_mode_compat():
-    cfg = DPOLossConfig(dynamic_beta=True, beta_mode="fixed")
+def test_loss_config_beta_mode():
+    cfg = DPOLossConfig(beta_mode="dynamic")
     assert cfg.resolved_beta_mode() == "dynamic"
-    cfg2 = DPOLossConfig(beta_mode="dynamic")
-    assert cfg2.resolved_beta_mode() == "dynamic"
+    cfg2 = DPOLossConfig(beta_mode="fixed")
+    assert cfg2.resolved_beta_mode() == "fixed"
     cfg3 = DPOLossConfig()
     assert cfg3.loss_type == "dpo"
     assert cfg3.resolved_beta_mode() == "fixed"
+    try:
+        DPOLossConfig(beta_mode="auto").resolved_beta_mode()
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "fixed|dynamic" in str(exc)
+
+
+def test_training_cfg_beta_api_unified():
+    """Hydra training 只认 beta_mode / fixed_beta / dynamic_beta 表。"""
+    from omegaconf import OmegaConf
+
+    from src.trainers.dpo_trainer import _build_loss_cfg, _resolve_beta_mode, _resolve_fixed_beta
+
+    tcfg = OmegaConf.create(
+        {
+            "beta_mode": "fixed",
+            "fixed_beta": 0.3,
+            "dynamic_beta": {"init_beta": 0.1, "target_kl": 4.0},
+            "beta": 0.99,  # 旧字段：应被忽略
+        }
+    )
+    assert _resolve_beta_mode(tcfg) == "fixed"
+    assert abs(_resolve_fixed_beta(tcfg) - 0.3) < 1e-9
+    cfg = _build_loss_cfg(tcfg)
+    assert abs(cfg.beta - 0.3) < 1e-9
+
+    with pytest.raises(ValueError, match="嵌套表"):
+        _build_loss_cfg(OmegaConf.create({"beta_mode": "dynamic", "dynamic_beta": True}))

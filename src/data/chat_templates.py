@@ -22,6 +22,51 @@ DEFAULT_CHAT_JINJA = (
     "{% if add_generation_prompt %}Assistant: {% endif %}"
 )
 
+_GENERATION_MARKERS = ("{% generation %}", "{%- generation %}", "{%generation%}")
+
+
+def ensure_assistant_generation_tags(template: str) -> str:
+    """
+    为 TRL ``assistant_only_loss`` 注入 ``{% generation %}`` 标记。
+
+    Qwen2.5 Instruct 等自带模板常把 user/assistant 写在同一分支，导致
+    ``return_assistant_tokens_mask`` 全 0；此处拆出 assistant 并包上 generation。
+    """
+    if not template or any(m in template for m in _GENERATION_MARKERS):
+        return template
+
+    # Qwen2.5：user/system/assistant(无 tool_calls) 共用一行渲染
+    combined = (
+        '{%- if (message.role == "user") or (message.role == "system" and not loop.first) '
+        'or (message.role == "assistant" and not message.tool_calls) %}\n'
+        "        {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}"
+    )
+    split = (
+        '{%- if (message.role == "user") or (message.role == "system" and not loop.first) %}\n'
+        "        {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}\n"
+        '    {%- elif message.role == "assistant" and not message.tool_calls %}\n'
+        "        {{- '<|im_start|>' + message.role + '\\n' }}"
+        "{% generation %}{{- message.content }}{% endgeneration %}"
+        "{{- '<|im_end|>' + '\\n' }}"
+    )
+    if combined in template:
+        template = template.replace(combined, split, 1)
+
+    # assistant + tool_calls 分支里单独的 content 行
+    plain_content = "{{- '\\n' + message.content }}"
+    tagged_content = (
+        "{{- '\\n' }}{% generation %}{{- message.content }}{% endgeneration %}"
+    )
+    if plain_content in template:
+        template = template.replace(plain_content, tagged_content)
+
+    if not any(m in template for m in _GENERATION_MARKERS):
+        logger.warning(
+            "chat template 缺少 {% generation %}，TRL assistant_only_loss 可能失败；"
+            "请改用 chat_template.source=inline 或关闭 assistant_only_loss"
+        )
+    return template
+
 
 def apply_chat_template_config(tokenizer: Any, chat_cfg: Any | None = None) -> Any:
     """
@@ -31,11 +76,15 @@ def apply_chat_template_config(tokenizer: Any, chat_cfg: Any | None = None) -> A
       - tokenizer: 优先保留模型自带；缺失则用 inline/jinja_file/DEFAULT
       - inline: 强制使用 chat_cfg.jinja
       - jinja_file: 从文件加载
+
+    最终会尽量注入 ``{% generation %}``，以兼容 TRL ``assistant_only_loss``。
     """
     if chat_cfg is None:
         if not getattr(tokenizer, "chat_template", None):
             tokenizer.chat_template = DEFAULT_CHAT_JINJA
             logger.info("使用内置默认 chat template")
+        else:
+            tokenizer.chat_template = ensure_assistant_generation_tags(tokenizer.chat_template)
         return tokenizer
 
     source = str(chat_cfg.get("source", "tokenizer"))
@@ -64,6 +113,12 @@ def apply_chat_template_config(tokenizer: Any, chat_cfg: Any | None = None) -> A
             )
         else:
             logger.info("使用模型自带 chat template (%s)", chat_cfg.get("name", "tokenizer"))
+
+    if getattr(tokenizer, "chat_template", None):
+        patched = ensure_assistant_generation_tags(str(tokenizer.chat_template))
+        if patched != tokenizer.chat_template:
+            tokenizer.chat_template = patched
+            logger.info("已为 chat template 注入 {% generation %}（assistant_only_loss）")
 
     return tokenizer
 

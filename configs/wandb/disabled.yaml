@@ -1,0 +1,10 @@
+enabled: false
+project: posttrainlab
+entity: null
+run_name: null
+mode: disabled  # online | offline | disabled
+tags: []
+notes: null
+dir: ${output_dir}/wandb
+log_model: false
+# 离线模式产物目录；sync: wandb sync outputs/wandb/offline-run-*

@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import src.data.loaders  # noqa: F401
 import src.evaluators  # noqa: F401 — 注册 gsm8k / humaneval
 from src.evaluators import evaluate
 from src.evaluators.common import eval_section

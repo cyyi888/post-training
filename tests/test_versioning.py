@@ -60,7 +60,7 @@ def test_make_version_custom_name():
 def test_save_load_roundtrip(tmpdir):
     tmp_path = Path(str(tmpdir))
     meta = make_version({"train": _samples(), "val": [], "test": []}, version="v-round")
-    path = save_version(meta, tmp_path, use_version_subdir=True)
+    path = save_version(meta, tmp_path)
     assert path.is_file()
     assert (tmp_path / "latest.json").is_file()
 
@@ -75,13 +75,13 @@ def test_save_load_roundtrip(tmpdir):
     assert loaded2.hash == meta.hash
 
 
-def test_save_flat_compat(tmpdir):
+def test_save_writes_latest_pointer(tmpdir):
     tmp_path = Path(str(tmpdir))
-    meta = make_version({"train": _samples()}, version="v-flat")
-    path = save_version(meta, tmp_path, use_version_subdir=False)
-    assert path == tmp_path / "dataset_version.json"
+    meta = make_version({"train": _samples()}, version="v-sub")
+    path = save_version(meta, tmp_path)
+    assert path == tmp_path / "v-sub" / "dataset_version.json"
     loaded = load_version(tmp_path)
-    assert loaded.version == "v-flat"
+    assert loaded.version == "v-sub"
 
 
 def test_verify_version_ok_and_fail():

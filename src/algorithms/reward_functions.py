@@ -66,11 +66,6 @@ def has_answer_format(text: str) -> bool:
     return bool(_BOXED_RE.search(text) or _HASH_RE.search(text))
 
 
-def has_boxed(text: str) -> bool:
-    """是否包含 ``\\boxed{...}`` 格式块。"""
-    return bool(_BOXED_RE.search(text))
-
-
 def extract_python_code(text: str) -> str:
     """从模型输出中提取 Python 代码（优先 markdown 代码块）。
 

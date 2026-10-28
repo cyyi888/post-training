@@ -391,10 +391,16 @@ step_dpo_smoke() {
 step_grpo_smoke() {
   activate_venv
   maybe_skip_gpu grpo_smoke && return 0
+  # 12GB 卡上默认 4×512 生成容易 OOM，可用环境变量缩小冒烟规模
   run_cmd grpo_smoke python scripts/train.py \
     training=grpo data=gsm8k \
     engineering.init_from_checkpoint=dpo \
     training.max_steps="$GRPO_STEPS" \
+    training.num_generations="${GRPO_NUM_GENERATIONS:-4}" \
+    training.max_completion_length="${GRPO_MAX_COMPLETION_LENGTH:-512}" \
+    training.gradient_checkpointing="${GRPO_GRADIENT_CHECKPOINTING:-false}" \
+    training.rollout.require_answer_format="${GRPO_REQUIRE_ANSWER_FORMAT:-true}" \
+    training.rollout.min_valid_per_group="${GRPO_MIN_VALID_PER_GROUP:-2}" \
     wandb=disabled
   ok "grpo_smoke max_steps=$GRPO_STEPS"
 }

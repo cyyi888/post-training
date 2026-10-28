@@ -1,13 +1,13 @@
-"""自研 DPO / IPO 损失：公式实现 + 配置 + 兼容入口。
+"""自研 DPO / IPO 损失：公式实现 + 配置。
 
 公式对应：
 - DPO: L = -E[ log σ(β · (log πθ(y+|x)/πref(y+|x) - log πθ(y-|x)/πref(y-|x))) ]
 - IPO(合页): L = E[ max(0, margin - β · (r+ - r-)) ]
 
 公开 API：
-- 底层：``dpo_loss`` / ``ipo_loss`` / ``compute_preference_loss``
 - 配置：``DPOLossConfig``
-- 兼容：``compute_dpo_loss`` / ``compute_ipo_loss`` / ``compute_variant_loss`` / ``DPOLoss``
+- 公式：``dpo_loss`` / ``ipo_loss``
+- 分发：``compute_preference_loss``
 """
 
 from __future__ import annotations
@@ -30,12 +30,16 @@ BetaMode = str  # "fixed" | "dynamic"
 
 @dataclass
 class DPOLossConfig:
-    """DPO / IPO 超参。"""
+    """DPO / IPO 超参。
+
+    β 口径：``beta_mode``（fixed|dynamic）+ 运行时标量 ``beta``。
+    Hydra 侧用 ``training.fixed_beta`` / ``training.dynamic_beta.*``，
+    由 trainer 解析后写入本配置。
+    """
 
     loss_type: LossType = "dpo"
-    beta: float = 0.1
+    beta: float = 0.1  # 当前使用的 β（fixed 时=fixed_beta；dynamic 时=init/控制器值）
     beta_mode: BetaMode = "fixed"
-    dynamic_beta: bool = False  # 兼容旧配置：True ↔ beta_mode=dynamic
     beta_min: float = 0.01
     beta_max: float = 1.0
     target_kl: float = 4.0
@@ -48,11 +52,10 @@ class DPOLossConfig:
     reference_free: bool = False
 
     def resolved_beta_mode(self) -> str:
-        if self.beta_mode in ("fixed", "dynamic"):
-            if self.dynamic_beta and self.beta_mode == "fixed":
-                return "dynamic"
-            return str(self.beta_mode)
-        return "dynamic" if self.dynamic_beta else "fixed"
+        mode = str(self.beta_mode or "fixed").lower()
+        if mode not in ("fixed", "dynamic"):
+            raise ValueError(f"beta_mode 必须是 fixed|dynamic，收到: {self.beta_mode!r}")
+        return mode
 
 
 # ---------------------------------------------------------------------------
@@ -182,106 +185,3 @@ def compute_preference_loss(
             margin=margin,
         )
     raise ValueError(f"未知 loss_type={loss_type!r}，可选: dpo | ipo")
-
-
-# ---------------------------------------------------------------------------
-# 兼容入口（Config / 旧调用名）
-# ---------------------------------------------------------------------------
-
-
-def compute_dpo_loss(
-    policy_chosen_logps: Any,
-    policy_rejected_logps: Any,
-    ref_chosen_logps: Any,
-    ref_rejected_logps: Any,
-    cfg: DPOLossConfig | None = None,
-    chosen_lengths: Any = None,
-    rejected_lengths: Any = None,
-    beta: float | None = None,
-    **_kwargs: Any,
-) -> tuple[Any, dict[str, float]]:
-    """计算标准 DPO 损失（忽略长度惩罚占位参数）。"""
-    del chosen_lengths, rejected_lengths
-    cfg = cfg or DPOLossConfig()
-    use_beta = float(cfg.beta if beta is None else beta)
-    return dpo_loss(
-        policy_chosen_logps,
-        policy_rejected_logps,
-        ref_chosen_logps,
-        ref_rejected_logps,
-        beta=use_beta,
-    )
-
-
-def compute_ipo_loss(
-    policy_chosen_logps: Any,
-    policy_rejected_logps: Any,
-    ref_chosen_logps: Any,
-    ref_rejected_logps: Any,
-    cfg: DPOLossConfig | None = None,
-    beta: float | None = None,
-    margin: float | None = None,
-    **_kwargs: Any,
-) -> tuple[Any, dict[str, float]]:
-    """IPO 合页变体（Config 兼容入口）。"""
-    cfg = cfg or DPOLossConfig(loss_type="ipo")
-    use_beta = float(cfg.beta if beta is None else beta)
-    use_margin = float(cfg.margin if margin is None else margin)
-    return ipo_loss(
-        policy_chosen_logps,
-        policy_rejected_logps,
-        ref_chosen_logps,
-        ref_rejected_logps,
-        beta=use_beta,
-        margin=use_margin,
-    )
-
-
-def compute_variant_loss(
-    loss_type: str,
-    policy_chosen_logps: Any,
-    policy_rejected_logps: Any,
-    ref_chosen_logps: Any,
-    ref_rejected_logps: Any,
-    cfg: DPOLossConfig | None = None,
-    **kwargs: Any,
-) -> tuple[Any, dict[str, float]]:
-    """按 loss_type 分发到 DPO / IPO（Config 兼容入口）。"""
-    cfg = cfg or DPOLossConfig()
-    beta = float(kwargs.pop("beta", cfg.beta))
-    margin = float(kwargs.pop("margin", cfg.margin))
-    return compute_preference_loss(
-        loss_type or cfg.loss_type,
-        policy_chosen_logps,
-        policy_rejected_logps,
-        ref_chosen_logps,
-        ref_rejected_logps,
-        beta=beta,
-        margin=margin,
-    )
-
-
-class DPOLoss:
-    """Loss 模块包装；真正计算走 preference / DPO 入口。"""
-
-    def __init__(self, cfg: DPOLossConfig | None = None):
-        self.cfg = cfg or DPOLossConfig()
-
-    def __call__(self, *args: Any, **kwargs: Any):
-        kind = str(kwargs.pop("loss_type", self.cfg.loss_type))
-        beta = float(kwargs.pop("beta", self.cfg.beta))
-        margin = float(kwargs.pop("margin", self.cfg.margin))
-        if len(args) >= 4:
-            return compute_preference_loss(
-                kind,
-                args[0],
-                args[1],
-                args[2],
-                args[3],
-                beta=beta,
-                margin=margin,
-            )
-        return compute_dpo_loss(*args, cfg=self.cfg, beta=beta, **kwargs)
-
-    def forward(self, *args: Any, **kwargs: Any):
-        return self.__call__(*args, **kwargs)

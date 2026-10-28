@@ -11,6 +11,7 @@ import torch
 from src.algorithms.grpo_utils import group_relative_advantages
 from src.algorithms.reward_functions import (
     RewardEngine,
+    available_rewards,
     extract_answer,
     extract_python_code,
     has_answer_format,
@@ -21,6 +22,12 @@ from src.algorithms.reward_functions import (
     reward_steps,
     score_math_steps,
 )
+
+
+def test_available_rewards_registered():
+    names = available_rewards()
+    for expected in ("accuracy", "code", "format", "length", "steps"):
+        assert expected in names
 
 
 def test_extract_answer_boxed_and_hash():

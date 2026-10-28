@@ -286,7 +286,7 @@ class BaseTrainer(ABC):
 
         runtime = getattr(self, "runtime", None) or self.resolve_runtime(config)
         kwargs: dict[str, Any] = {
-            # 禁止 HF 直连 W&B，统一经 MetricSinkCallback / track_metrics
+            # 禁止 HF 直连 W&B，统一经 MetricSink Callback / track_metrics
             "report_to": resolve_hf_report_to(config),
             "run_name": default_run_name(config),
             "logging_dir": f"{config.output_dir}/logs/{config.training.algorithm}",
