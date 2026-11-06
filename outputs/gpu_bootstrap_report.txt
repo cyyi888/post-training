@@ -1,0 +1,20 @@
+PostTrainLab GPU bootstrap
+started: 2026-10-31 21:22:37
+root: /home/u2025140064/post-training
+args: skip_install=1 skip_download=0 skip_tests=0 skip_train=0 with_pipeline_smoke=0 from=- through=-
+----------------------------------------
+SKIP  env_setup（--skip-install）；当前: /home/u2025140064/post-training/.venv/bin/python
+PASS  preflight
+PASS  download_assets
+PASS  cpu_tests
+PASS  sft_smoke max_steps=4
+PASS  sft_eval
+PASS  dpo_smoke max_steps=4
+PASS  grpo_smoke max_steps=2
+PASS  grpo_eval
+PASS  pipeline_dry
+PASS  ablation_dry
+SKIP  pipeline_smoke（未传 --with-pipeline-smoke；避免重复长训）
+----------------------------------------
+ALL STEPS FINISHED OK
+ended: 2026-10-31 21:43:41
